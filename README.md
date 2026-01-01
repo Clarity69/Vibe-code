@@ -1,53 +1,53 @@
 # 🚀 VibeCode AI: Your Intelligent Workstation
 
-**VibeCode AI** adalah platform asisten kecerdasan buatan (AI) modern yang menggabungkan kemampuan Large Language Models (LLM) terbaru dengan manajemen basis data yang aman. Aplikasi ini dirancang untuk memberikan pengalaman chat yang mulus, mampu membaca dokumen kompleks, dan menjaga riwayat percakapan Anda tetap aman.
-
-
+**VibeCode AI** is a modern artificial intelligence (AI) assistant platform that combines the power of the latest Large Language Models (LLMs) with secure database management. This application is designed to provide a seamless chat experience, capable of reading complex documents and keeping your conversation history secure.
 
 ---
 
-## Overview
-<img src="assets/vibes.png" alt="Alt text">
-## Fitur Unggulan
+## 🏗️ Overview
+<img src="assets/new.png" alt="Alt text">
 
-### Dual-Model Intelligence
-Pilih otak yang paling sesuai untuk tugas Anda:
-* **DeepSeek-R1**: Spesialis dalam penalaran logis, matematika, dan pemecahan masalah kompleks.
-* **Meta Llama 3.2**: Cepat, efisien, dan sangat natural untuk percakapan sehari-hari atau brainstorming.
 
-### 📂 Document Reader (RAG-Ready)
-Jangan biarkan dokumen Anda menumpuk. Unggah file dan biarkan VibeCode menganalisisnya:
-* **PDF**: Ekstraksi teks dari laporan atau jurnal.
-* **DOCX**: Membaca dokumen Word secara instan.
-* **TXT**: Memproses file teks mentah.
+VibeCode AI serves as a bridge between your local documents and powerful cloud-based AI models, ensuring that architectural blueprints and coding requirements are handled with senior-level precision.
 
-### 💾 Smart Persistence & Privacy
-* **Auto-Save History**: Percakapan Anda tersimpan otomatis ke cloud via Supabase.
-* **Session Continuity**: Berkat integrasi Cookie, Anda tetap bisa melanjutkan chat lama tanpa perlu login berulang kali.
-* **Password Hashing**: Keamanan data pengguna terjamin dengan enkripsi `bcrypt`.
+### ✨ Key Features
+
+* **Dual-Model Intelligence**: Choose the "brain" that best suits your task:
+    * **DeepSeek-R1**: Specialized in logical reasoning, mathematics, and complex problem-solving.
+    * **Meta Llama 3.2**: Fast, efficient, and highly natural for daily conversations or brainstorming.
+* **📂 Document Reader (RAG-Ready)**: Don't let your documents pile up. Upload files and let VibeCode analyze them:
+    * **PDF**: Text extraction from reports or journals.
+    * **DOCX**: Instant reading of Word documents.
+    * **TXT**: Processing of raw text files.
+* **💾 Smart Persistence & Privacy**:
+    * **Auto-Save History**: Your conversations are automatically saved to the cloud via Supabase.
+    * **Session Continuity**: Continue old chats without needing to log in repeatedly.
+    * **Password Hashing**: User data security is guaranteed with `bcrypt` encryption.
 
 ---
 
 ## 🛠️ Tech Stack
 
-Aplikasi ini dibangun menggunakan ekosistem teknologi terbaik:
+This application is built using a top-tier technology ecosystem:
 
-| Komponen | Teknologi | Deskripsi |
+| Component | Technology | Description |
 | :--- | :--- | :--- |
-| **Frontend** | [Streamlit](https://streamlit.io/) | Dashboard interaktif dan responsif. |
-| **LLM Gateway** | [Hugging Face](https://huggingface.co/) | Inference API untuk model Llama & DeepSeek. |
-| **Database** | [Supabase](https://supabase.com/) | PostgreSQL untuk penyimpanan chat & user. |
-| **Security** | Bcrypt | Standar industri untuk hashing password. |
-| **Storage** | Browser Cookies | Menggunakan `extra-streamlit-components` untuk sesi. |
+| **Frontend** | [Streamlit](https://streamlit.io/) | Interactive and responsive dashboard. |
+| **LLM Gateway** | [Hugging Face](https://huggingface.co/) | Inference API for Llama & DeepSeek models. |
+| **Database** | [Supabase](https://supabase.com/) | PostgreSQL for chat and user storage. |
+| **Security** | Bcrypt | Industry standard for password hashing. |
+| **Storage** | Browser Cookies | For seamless session management. |
 
 ---
 
-## 🚀 Instalasi & Penggunaan
+## 🚀 Installation & Usage
 
-### 1. Prasyarat
-Pastikan Anda sudah menginstal Python 3.9+ dan memiliki akun di Hugging Face serta Supabase.
+### 1. Prerequisites
+* Python 3.9+
+* Hugging Face API Token
+* Supabase Project URL & API Key
 
-### 2. Clone Repositori
+### 2. Clone Repository
 ```bash
-git clone [https://github.com/USERNAME-ANDA/vibe-code.git](https://github.com/USERNAME-ANDA/vibe-code.git)
+git clone [https://github.com/YOUR-USERNAME/vibe-code.git](https://github.com/YOUR-USERNAME/vibe-code.git)
 cd vibe-code
