@@ -1,21 +1,21 @@
-# 🚀 VibeCode AI: Your Intelligent Workstation
+# The Blueprint: Your Intelligent Workstation
 
 **VibeCode AI** is a modern artificial intelligence (AI) assistant platform that combines the power of the latest Large Language Models (LLMs) with secure database management. This application is designed to provide a seamless chat experience, capable of reading complex documents and keeping your conversation history secure.
 
 ---
 
-## 🏗️ Overview
+## Overview
 <img src="assets/new.png" alt="Alt text">
 
 
-VibeCode AI serves as a bridge between your local documents and powerful cloud-based AI models, ensuring that architectural blueprints and coding requirements are handled with senior-level precision.
+The Blueprint serves as a bridge between your local documents and powerful cloud-based AI models, ensuring that architectural blueprints and coding requirements are handled with senior-level precision.
 
 ### ✨ Key Features
 
 * **Dual-Model Intelligence**: Choose the "brain" that best suits your task:
     * **DeepSeek-R1**: Specialized in logical reasoning, mathematics, and complex problem-solving.
     * **Meta Llama 3.2**: Fast, efficient, and highly natural for daily conversations or brainstorming.
-* **📂 Document Reader (RAG-Ready)**: Don't let your documents pile up. Upload files and let VibeCode analyze them:
+* **📂 Document Reader (RAG-Ready)**: Don't let your documents pile up. Upload files and let Architect analyze them:
     * **PDF**: Text extraction from reports or journals.
     * **DOCX**: Instant reading of Word documents.
     * **TXT**: Processing of raw text files.
