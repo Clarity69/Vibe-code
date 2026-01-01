@@ -191,36 +191,40 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
 
 # --- 8. AI RESPONSE ---
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    with st.chat_message("assistant", avatar=None):
-        res_box = st.empty()
-        full_res = ""
-        TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-        sys_prompt = [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}. Use markdown."}]
-        try:
-            resp = requests.post(
-                "https://router.huggingface.co/v1/chat/completions",
-                headers={"Authorization": f"Bearer {TOKEN}"},
-                json={
-                    "model": DEDICATED_MODEL, 
-                    "messages": sys_prompt + st.session_state.messages, 
-                    "temperature": st.session_state.temp, 
-                    "stream": True
-                },
-                stream=True
-            )
-            for line in resp.iter_lines():
-                if line:
-                    decoded = line.decode('utf-8')
-                    if decoded.startswith("data: ") and "[DONE]" not in decoded:
-                        try:
-                            token = json.loads(decoded[6:])["choices"][0]["delta"].get("content", "")
-                            full_res += token
-                            res_box.markdown(f"**:green[Architect]**: {full_res}▌")
-                        except: continue
-            
-            res_box.markdown(f"**:green[Architect]**: {full_res}")
-            st.session_state.messages.append({"role": "assistant", "content": full_res})
-            save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
-            st.rerun()
-        except Exception as e:
-            st.error(f"Architect link lost: {e}")
+    # GANTI: Jangan pakai 'with st.chat_message'
+    # Pakai st.empty() langsung di area utama agar tidak memicu container avatar
+    res_box = st.empty() 
+    full_res = ""
+    TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+    sys_prompt = [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}. Use markdown."}]
+    
+    try:
+        resp = requests.post(
+            "https://router.huggingface.co/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json={
+                "model": DEDICATED_MODEL, 
+                "messages": sys_prompt + st.session_state.messages, 
+                "temperature": st.session_state.temp, 
+                "stream": True
+            },
+            stream=True
+        )
+        for line in resp.iter_lines():
+            if line:
+                decoded = line.decode('utf-8')
+                if decoded.startswith("data: ") and "[DONE]" not in decoded:
+                    try:
+                        token = json.loads(decoded[6:])["choices"][0]["delta"].get("content", "")
+                        full_res += token
+                        # Tampilkan teks hijau langsung di area chat
+                        res_box.markdown(f"**:green[Architect]**: {full_res}▌")
+                    except: continue
+        
+        # Tampilan akhir tanpa kursor streaming
+        res_box.markdown(f"**:green[Architect]**: {full_res}")
+        st.session_state.messages.append({"role": "assistant", "content": full_res})
+        save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
+        st.rerun()
+    except Exception as e:
+        st.error(f"Architect link lost: {e}")
