@@ -91,7 +91,7 @@ with st.sidebar:
             st.session_state.messages = db_history[cid]
             st.rerun()
 
-# --- 7. Main Chat Display ---
+# --- 7. Main Chat Display (Sejajar & Tanpa Heading) ---
 chat_placeholder = st.container()
 with chat_placeholder:
     for msg in st.session_state.messages:
@@ -99,28 +99,18 @@ with chat_placeholder:
         if msg["role"] == "user":
             if "[Isi Dokumen:" in content:
                 content = content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
-            st.markdown(f"**:blue[Me:]** \n {content}")
+            # Menggunakan format bold warna tanpa hashtag
+            st.markdown(f"**:blue[YOU:]** {content}")
         else:
-            st.markdown(f"**:green[Judge:**] \n {content}")
+            # Menggunakan format bold warna tanpa hashtag
+            st.markdown(f"**:green[Judge:]** {content}")
         st.write("---")
 
-# Input Chat
-if prompt := st.chat_input("Input Here..."):
-    # Logika Ganti Judul Otomatis jika masih default 'Chat X'
-    if st.session_state.current_chat_id.startswith("Chat "):
-        new_title = generate_chat_title(prompt)
-        # Hindari duplikasi ID
-        if new_title in db_history:
-            new_title = f"{new_title} ({len(db_history)})"
-        st.session_state.current_chat_id = new_title
-
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.rerun()
-
-# Logika Respon Judge
+# --- Logika Respon Judge (Update Tampilan Streaming) ---
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     full_response = ""
-    st.markdown("#### :green[Judge:]")
+    # Header Judge saat streaming (Tanpa hashtag)
+    st.markdown("**:green[Judge:]**")
     res_box = st.empty()
     
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
@@ -141,6 +131,8 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                         
                         clean_view = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
                         clean_view = re.sub(r'<think>.*', '', clean_view, flags=re.DOTALL)
+                        
+                        # Tampilan streaming yang sejajar
                         res_box.markdown(clean_view + "▌")
                     except: continue
         
