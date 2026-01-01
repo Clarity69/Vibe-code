@@ -115,17 +115,7 @@ with st.sidebar:
     selected_model = st.selectbox("Model", ["meta-llama/Llama-3.2-3B-Instruct","deepseek-ai/DeepSeek-R1"])
     temp = st.slider("Creativity", 0.0, 1.0, 0.40)
 
-# --- 7. Tampilan Chat Utama ---
-# Tampilkan riwayat chat yang aktif
-for msg in st.session_state.messages:
-    # Filter konten untuk menyembunyikan log dokumen yang panjang di UI
-    display_content = msg["content"]
-    if msg["role"] == "user" and "[Isi Dokumen:" in display_content:
-        display_content = display_content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
-    
-    with st.chat_message(msg["role"], avatar=USER_ICON if msg["role"]=="user" else AI_ICON):
-        st.markdown(display_content)
-
+# --- 7. Main Chat Display & Logic ---
 # Input Chat
 if prompt := st.chat_input("Message VibeCode...", accept_file=True):
     user_text = prompt.text if hasattr(prompt, 'text') else prompt
@@ -137,42 +127,64 @@ if prompt := st.chat_input("Message VibeCode...", accept_file=True):
         file_context += f"\n\n[Isi Dokumen: {f.name}]\n{content}\n"
 
     final_prompt = user_text + file_context
+    
+    # MASUKKAN PESAN USER KE STATE SEBELUM GENERATE
     st.session_state.messages.append({"role": "user", "content": final_prompt})
     
-    with st.chat_message("user", avatar=USER_ICON):
-        st.markdown(user_text if not uploaded_files else f"{user_text} *(Mengunggah {len(uploaded_files)} file)*")
+    # Simpan ke DB segera agar tidak hilang jika koneksi putus tengah jalan
+    save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
+    
+    # Jalankan st.rerun() untuk menampilkan pesan user di UI sebelum AI membalas
+    st.rerun()
 
+# CEK APAKAH PESAN TERAKHIR DARI USER (Artinya butuh jawaban AI)
+if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     with st.chat_message("assistant", avatar=AI_ICON):
         placeholder = st.empty()
         full_response = ""
         
-        # Ambil Token
+        # Konfigurasi API
         TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
         HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+        
+        # Bersihkan pesan dari tag thinking model sebelumnya jika ada
+        payload_messages = []
+        for m in st.session_state.messages:
+            clean_content = m["content"]
+            # Opsional: bersihkan output lama jika menggunakan DeepSeek agar tidak bingung
+            payload_messages.append({"role": m["role"], "content": clean_content})
+
         payload = {
             "model": selected_model, 
-            "messages": st.session_state.messages, 
+            "messages": payload_messages, 
             "temperature": temp, 
             "stream": True
         }
 
         try:
             resp = requests.post("https://router.huggingface.co/v1/chat/completions", headers=HEADERS, json=payload, stream=True)
-            for line in resp.iter_lines():
-                if line:
-                    line_text = line.decode('utf-8')
-                    if line_text.startswith("data: "):
-                        data_str = line_text[6:]
-                        if data_str.strip() == "[DONE]": break
-                        try:
-                            token = json.loads(data_str)["choices"][0]["delta"].get("content", "")
-                            full_response += token
-                            placeholder.markdown(full_response + "▌")
-                        except: continue
             
-            placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
-            # Simpan ke Supabase setelah AI selesai bicara
-            save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
+            # Cek status code sebelum looping
+            if resp.status_code != 200:
+                st.error(f"API Error ({resp.status_code}): {resp.text}")
+            else:
+                for line in resp.iter_lines():
+                    if line:
+                        line_text = line.decode('utf-8')
+                        if line_text.startswith("data: "):
+                            data_str = line_text[6:]
+                            if data_str.strip() == "[DONE]": break
+                            try:
+                                chunk = json.loads(data_str)
+                                token = chunk["choices"][0]["delta"].get("content", "")
+                                full_response += token
+                                placeholder.markdown(full_response + "▌")
+                            except: continue
+                
+                placeholder.markdown(full_response)
+                # SIMPAN JAWABAN AI
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
+                st.rerun() # Refresh agar UI sinkron
         except Exception as e:
             st.error(f"Koneksi AI terputus: {e}")
