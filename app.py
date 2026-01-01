@@ -81,7 +81,7 @@ with st.sidebar:
         st.session_state.messages = [{"role": "assistant", "content": "Ada yang bisa saya bantu?"}]
         st.rerun()
 
-    st.write("### Riwayat")
+    st.write("### Chat History")
     for cid in sorted(db_history.keys(), reverse=True):
         if st.button(cid, key=f"btn_{cid}", use_container_width=True):
             st.session_state.current_chat_id = cid
