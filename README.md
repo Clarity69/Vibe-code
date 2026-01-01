@@ -49,19 +49,21 @@ This application is built using a top-tier technology ecosystem:
 
 ### 2. Clone Repository
 ```bash
-git clone [https://github.com/YOUR-USERNAME/vibe-code.git](https://github.com/YOUR-USERNAME/vibe-code.git)
+git clone [https://github.com/Clarity69/Vibe-code.git](https://github.com/Clarity69/Vibe-code.git)
 cd vibe-code
+```
 
 ### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
-
+```
 ### 4. Enviroment Variables
 ```bash
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_anon_key
 HF_TOKEN=your_huggingface_token
-
+```
 ### RUN
 ```bash
 streamlit run app.py
+```
