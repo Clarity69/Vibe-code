@@ -35,7 +35,6 @@ if "user_data" not in st.session_state:
     except:
         pass
 
-# Initialize settings in state
 if "temp" not in st.session_state:
     st.session_state.temp = 0.4
 
@@ -105,46 +104,56 @@ user_id = st.session_state.user_data.id
 username = st.session_state.username
 db_history = load_user_chats(user_id)
 
+st.markdown("""
+    <style>
+        [data-testid="stSidebarNav"] {display: none;}
+        .stButton button { border-radius: 4px; text-align: left; }
+    </style>
+""", unsafe_allow_html=True)
+
 with st.sidebar:
     st.title("The Blueprint")
     st.write(f"User: **{username}**")
-    if st.button("+ New Blueprint", use_container_width=False):
+    st.caption("● System Online")
+    
+    # NEW BLUEPRINT (Primary action)
+    if st.button("+ New Blueprint", use_container_width=True, type="primary"):
         st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
-        st.session_state.messages = [{"role": "assistant", "content": "New architectural session started."}]
+        st.session_state.messages = [{"role": "assistant", "content": "Architect ready. System status: Online."}]
         st.rerun()
+    
     st.divider()
     
-    st.write("### History")
-    for cid in db_history.keys():
-        if st.button(cid, key=f"btn_{cid}", use_container_width=True):
-            st.session_state.current_chat_id = cid
-            st.session_state.messages = db_history[cid]
-            st.rerun()
+    # HISTORY / ARCHIVE
+    st.subheader("Archive")
+    history_container = st.container(height=350, border=False)
+    with history_container:
+        if not db_history:
+            st.caption("No archived blueprints.")
+        for cid in db_history.keys():
+            is_active = cid == st.session_state.current_chat_id
+            btn_label = f"» {cid}" if is_active else cid
+            if st.button(btn_label, key=f"btn_{cid}", use_container_width=True):
+                st.session_state.current_chat_id = cid
+                st.session_state.messages = db_history[cid]
+                st.rerun()
 
-    for _ in range(10): st.write("") 
-    
+    # SETTINGS (Footer)
     st.divider()
-    with st.expander("⚙️ Settings"):
-        # 1. Temperature Slider
-        st.session_state.temp = st.slider(
-            "Architect Creativity", 
-            min_value=0.0, max_value=1.0, 
-            value=st.session_state.temp, 
-            step=0.1,
-            help="Low: Precise code. High: Creative design."
-        )
+    with st.expander("⚙️ System Control"):
+        st.write("Model Settings")
+        st.session_state.temp = st.slider("Creativity", 0.0, 1.0, st.session_state.temp, 0.1)
         
-        # 2. Clear History Button
+        st.divider()
         if st.button("Clear All Blueprints", use_container_width=True):
             try:
                 supabase.table("chat_history").delete().eq("user_id", user_id).execute()
-                st.session_state.messages = [{"role": "assistant", "content": "All history cleared."}]
+                st.session_state.messages = [{"role": "assistant", "content": "History cleared."}]
                 st.session_state.current_chat_id = "Main Blueprint"
                 st.rerun()
-            except Exception as e:
-                st.error(f"Clear failed: {e}")
+            except:
+                st.error("Error clearing data.")
 
-        st.divider()
         if st.button("Logout", use_container_width=True, type="primary"):
             supabase.auth.sign_out()
             st.session_state.clear()
@@ -180,6 +189,7 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
         st.session_state.current_chat_id = (user_text[:30] + '...') if len(user_text) > 30 else user_text
     st.rerun()
 
+# --- 8. AI RESPONSE ---
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     with st.chat_message("assistant", avatar=None):
         res_box = st.empty()
@@ -193,7 +203,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                 json={
                     "model": DEDICATED_MODEL, 
                     "messages": sys_prompt + st.session_state.messages, 
-                    "temperature": st.session_state.temp, # Linked to slider
+                    "temperature": st.session_state.temp, 
                     "stream": True
                 },
                 stream=True
@@ -202,12 +212,15 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                 if line:
                     data = line.decode('utf-8')
                     if data.startswith("data: ") and "[DONE]" not in data:
-                        token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
-                        full_res += token
-                        res_box.markdown(f"**:green[Architect]**: {full_res}▌")
+                        try:
+                            token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
+                            full_res += token
+                            res_box.markdown(f"**:green[Architect]**: {full_res}▌")
+                        except: continue
+            
             res_box.markdown(f"**:green[Architect]**: {full_res}")
             st.session_state.messages.append({"role": "assistant", "content": full_res})
             save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
             st.rerun()
-        except:
-            st.error("Connection error.")
+        except Exception as e:
+            st.error(f"Architect link lost: {e}")
