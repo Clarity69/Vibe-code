@@ -4,3 +4,5 @@ python-dotenv
 pypdf2
 python-docx
 supabase
+bcrypt
+extra-streamlit-components
