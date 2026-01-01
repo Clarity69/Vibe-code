@@ -36,13 +36,12 @@ def init_supabase():
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
-@st.cache_resource
+# HAPUS @st.cache_resource di sini karena menyebabkan CachedWidgetWarning
 def get_cookie_manager():
     return stx.CookieManager()
 
 supabase = init_supabase()
-cookie_manager = get_cookie_manager()
-
+cookie_manager = get_cookie_manager() # Panggil tanpa cache
 # --- 3. Fungsi Keamanan (Auth) ---
 def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
