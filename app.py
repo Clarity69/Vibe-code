@@ -104,6 +104,16 @@ user_id = st.session_state.user_data.id
 username = st.session_state.username
 db_history = load_user_chats(user_id)
 
+# FIX: Inisialisasi variabel state sebelum digunakan di sidebar
+if "current_chat_id" not in st.session_state:
+    if db_history:
+        latest_id = list(db_history.keys())[0]
+        st.session_state.current_chat_id = latest_id
+        st.session_state.messages = db_history[latest_id]
+    else:
+        st.session_state.current_chat_id = "Main Blueprint"
+        st.session_state.messages = [{"role": "assistant", "content": "Architect ready. System status: Online."}]
+
 st.markdown("""
     <style>
         [data-testid="stSidebarNav"] {display: none;}
@@ -116,7 +126,6 @@ with st.sidebar:
     st.write(f"User: **{username}**")
     st.caption("● System Online")
     
-    # NEW BLUEPRINT (Primary action)
     if st.button("+ New Blueprint", use_container_width=True, type="primary"):
         st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
         st.session_state.messages = [{"role": "assistant", "content": "Architect ready. System status: Online."}]
@@ -124,21 +133,20 @@ with st.sidebar:
     
     st.divider()
     
-    # HISTORY / ARCHIVE
     st.subheader("Archive")
     history_container = st.container(height=350, border=False)
     with history_container:
         if not db_history:
             st.caption("No archived blueprints.")
         for cid in db_history.keys():
-            is_active = cid == st.session_state.current_chat_id
+            # Gunakan .get() agar lebih aman dari AttributeError
+            is_active = cid == st.session_state.get("current_chat_id")
             btn_label = f"» {cid}" if is_active else cid
             if st.button(btn_label, key=f"btn_{cid}", use_container_width=True):
                 st.session_state.current_chat_id = cid
                 st.session_state.messages = db_history[cid]
                 st.rerun()
 
-    # SETTINGS (Footer)
     st.divider()
     with st.expander("⚙️ System Control"):
         st.write("Model Settings")
@@ -148,8 +156,9 @@ with st.sidebar:
         if st.button("Clear All Blueprints", use_container_width=True):
             try:
                 supabase.table("chat_history").delete().eq("user_id", user_id).execute()
-                st.session_state.messages = [{"role": "assistant", "content": "History cleared."}]
-                st.session_state.current_chat_id = "Main Blueprint"
+                # Reset state sepenuhnya setelah hapus data
+                st.session_state.pop("messages", None)
+                st.session_state.pop("current_chat_id", None)
                 st.rerun()
             except:
                 st.error("Error clearing data.")
@@ -159,16 +168,7 @@ with st.sidebar:
             st.session_state.clear()
             st.rerun()
 
-# --- 7. CHAT LOGIC ---
-if "messages" not in st.session_state:
-    if db_history:
-        latest_id = list(db_history.keys())[0]
-        st.session_state.current_chat_id = latest_id
-        st.session_state.messages = db_history[latest_id]
-    else:
-        st.session_state.current_chat_id = "Main Blueprint"
-        st.session_state.messages = [{"role": "assistant", "content": "Architect ready. System status: Online."}]
-
+# --- 7. CHAT DISPLAY ---
 st.caption(f"Project Session: {st.session_state.current_chat_id}")
 
 for msg in st.session_state.messages:
@@ -210,10 +210,10 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
             )
             for line in resp.iter_lines():
                 if line:
-                    data = line.decode('utf-8')
-                    if data.startswith("data: ") and "[DONE]" not in data:
+                    decoded = line.decode('utf-8')
+                    if decoded.startswith("data: ") and "[DONE]" not in decoded:
                         try:
-                            token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
+                            token = json.loads(decoded[6:])["choices"][0]["delta"].get("content", "")
                             full_res += token
                             res_box.markdown(f"**:green[Architect]**: {full_res}▌")
                         except: continue
