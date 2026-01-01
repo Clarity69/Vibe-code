@@ -110,7 +110,7 @@ def display_chat():
             content = msg["content"]
             if msg["role"] == "user":
                 if "[Isi Dokumen:" in content:
-                    content = content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
+                    content = content.split("\n\n[Isi Dokumen:")[0] + " *(inserted file)*"
                 st.markdown(f"**:blue[YOU:]** {content}")
             else:
                 st.markdown(f"**:green[Judge:]** {content}")
