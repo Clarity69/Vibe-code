@@ -55,7 +55,6 @@ def load_user_chats():
     except: return {}
 
 def generate_chat_title(prompt):
-    # Mengambil 5 kata pertama sebagai judul
     words = prompt.split()[:5]
     title = " ".join(words)
     return (title[:30] + '...') if len(title) > 30 else title
@@ -91,57 +90,83 @@ with st.sidebar:
             st.session_state.messages = db_history[cid]
             st.rerun()
 
-# --- 7. Main Chat Display (Sejajar & Tanpa Heading) ---
+# --- 7. Main Chat Display & Input ---
 chat_placeholder = st.container()
-with chat_placeholder:
-    for msg in st.session_state.messages:
-        content = msg["content"]
-        if msg["role"] == "user":
-            if "[Isi Dokumen:" in content:
-                content = content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
-            # Menggunakan format bold warna tanpa hashtag
-            st.markdown(f"**:blue[YOU:]** {content}")
-        else:
-            # Menggunakan format bold warna tanpa hashtag
-            st.markdown(f"**:green[Judge:]** {content}")
-        st.write("---")
 
-# --- Logika Respon Judge (Update Tampilan Streaming) ---
+# Fungsi untuk menampilkan riwayat
+def display_chat():
+    with chat_placeholder:
+        for msg in st.session_state.messages:
+            content = msg["content"]
+            if msg["role"] == "user":
+                if "[Isi Dokumen:" in content:
+                    content = content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
+                st.markdown(f"**:blue[Me:]** {content}")
+            else:
+                st.markdown(f"**:green[Judge:]** {content}")
+            st.write("---")
+
+display_chat()
+
+# Input Chat
+if prompt := st.chat_input("Input Here..."):
+    # Ganti judul jika chat baru
+    if st.session_state.current_chat_id.startswith("Chat "):
+        new_title = generate_chat_title(prompt)
+        if new_title in db_history:
+            new_title = f"{new_title} ({len(db_history)})"
+        st.session_state.current_chat_id = new_title
+
+    # Tambah pesan user ke state
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Refresh halaman untuk menampilkan pesan YOU segera
+    st.rerun()
+
+# Logika Respon Judge (Hanya jalan jika pesan terakhir adalah User)
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     full_response = ""
-    # Header Judge saat streaming (Tanpa hashtag)
-    st.markdown("**:green[Judge:]**")
-    res_box = st.empty()
     
-    TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    HEADERS = {"Authorization": f"Bearer {TOKEN}"}
-    payload = {"model": DEDICATED_MODEL, "messages": st.session_state.messages, "temperature": 0.4, "stream": True}
+    with chat_placeholder:
+        st.markdown("**:green[Judge:]**")
+        res_box = st.empty()
+        
+        TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+        HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+        payload = {
+            "model": DEDICATED_MODEL, 
+            "messages": st.session_state.messages, 
+            "temperature": 0.4, 
+            "stream": True
+        }
 
-    try:
-        resp = requests.post("https://router.huggingface.co/v1/chat/completions", headers=HEADERS, json=payload, stream=True)
-        for line in resp.iter_lines():
-            if line:
-                line_text = line.decode('utf-8')
-                if line_text.startswith("data: "):
-                    data_str = line_text[6:]
-                    if data_str.strip() == "[DONE]": break
-                    try:
-                        token = json.loads(data_str)["choices"][0]["delta"].get("content", "")
-                        full_response += token
-                        
-                        clean_view = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
-                        clean_view = re.sub(r'<think>.*', '', clean_view, flags=re.DOTALL)
-                        
-                        # Tampilan streaming yang sejajar
-                        res_box.markdown(clean_view + "▌")
-                    except: continue
-        
-        final_clean = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
-        res_box.markdown(final_clean)
-        
-        st.session_state.messages.append({"role": "assistant", "content": final_clean})
-        save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
-        st.rerun()
-        
-    except Exception as e:
-        st.error(f"Error: {e}")
+        try:
+            resp = requests.post("https://router.huggingface.co/v1/chat/completions", headers=HEADERS, json=payload, stream=True)
+            for line in resp.iter_lines():
+                if line:
+                    line_text = line.decode('utf-8')
+                    if line_text.startswith("data: "):
+                        data_str = line_text[6:]
+                        if data_str.strip() == "[DONE]": break
+                        try:
+                            token = json.loads(data_str)["choices"][0]["delta"].get("content", "")
+                            full_response += token
+                            
+                            # Filter tag think
+                            clean_view = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
+                            clean_view = re.sub(r'<think>.*', '', clean_view, flags=re.DOTALL)
+                            res_box.markdown(clean_view + "▌")
+                        except: continue
+            
+            final_clean = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
+            res_box.markdown(final_clean)
+            
+            # Simpan jawaban ke state dan DB
+            st.session_state.messages.append({"role": "assistant", "content": final_clean})
+            save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
+            
+            # Rerun terakhir untuk merapikan UI
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Error: {e}")
