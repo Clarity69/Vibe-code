@@ -27,20 +27,23 @@ def init_supabase():
 supabase = init_supabase()
 cookie_manager = stx.CookieManager()
 
-# --- 3. Logika Identitas Otomatis (Anti-Refresh) ---
+# --- 3. Logika Identitas Otomatis (Sinkronisasi Cookie & Session) ---
 if "user_uuid" not in st.session_state:
-    # Beri jeda sebentar untuk baca cookie lama
-    time.sleep(0.5)
+    # Beri waktu sinkronisasi awal
+    time.sleep(0.5) 
     saved_uuid = cookie_manager.get("vibecode_user_id")
     
     if saved_uuid:
         st.session_state.user_uuid = saved_uuid
     else:
-        # Jika benar-benar baru, buat ID unik baru
+        # Jika benar-benar baru atau cookie gagal muat di awal
+        # Kita buat ID sementara dulu agar tidak error
         new_id = str(uuid.uuid4())
         st.session_state.user_uuid = new_id
         cookie_manager.set("vibecode_user_id", new_id, 
                            expires_at=datetime.datetime.now() + datetime.timedelta(days=30))
+        # Rerun diperlukan agar cookie_manager.get() bisa membaca data yang baru diset
+        st.rerun()
 
 # --- 4. Fungsi Database & Dokumen ---
 def save_chat_to_db(chat_id, messages):
@@ -63,29 +66,39 @@ def read_document(file):
         return "\n".join([p.text for p in Document(file).paragraphs])
     return file.read().decode("utf-8")
 
-# --- 5. Sidebar Riwayat Chat ---
+# --- 5. Sidebar & Inisialisasi Chat (Cegah Reset ke Chat 1) ---
+db_history = load_user_chats()
+
+# Jika baru reload, coba kembalikan ke Chat terakhir yang aktif
+if "current_chat_id" not in st.session_state:
+    if db_history:
+        # Ambil chat terakhir berdasarkan urutan kunci (atau logika urutan waktu)
+        last_chat_id = sorted(db_history.keys(), reverse=True)[0]
+        st.session_state.current_chat_id = last_chat_id
+        st.session_state.messages = db_history[last_chat_id]
+    else:
+        st.session_state.current_chat_id = "Chat 1"
+        st.session_state.messages = [{"role": "assistant", "content": "wassup folks!"}]
+
 with st.sidebar:
     st.title("VibeCode")
-    st.caption(f"User ID: {st.session_state.user_uuid[:8]}...") # Tampilan ID pendek
-    
-    db_history = load_user_chats()
+    st.caption(f"User ID: {st.session_state.user_uuid[:8]}...")
     
     if st.button("+ New Chat", use_container_width=True):
-        st.session_state.current_chat_id = f"Chat {len(db_history) + 1}"
+        # Buat nama chat baru berdasarkan jumlah riwayat
+        new_no = len(db_history) + 1
+        st.session_state.current_chat_id = f"Chat {new_no}"
         st.session_state.messages = [{"role": "assistant", "content": "Halo! Ada yang bisa saya bantu?"}]
         st.rerun()
 
     st.write("### Chat History")
+    # Tampilkan daftar riwayat dari database
     for cid in sorted(db_history.keys(), reverse=True):
-        if st.button(cid, key=cid, use_container_width=True):
+        if st.button(cid, key=f"btn_{cid}", use_container_width=True):
             st.session_state.current_chat_id = cid
             st.session_state.messages = db_history[cid]
             st.rerun()
-    
-    st.divider()
-    selected_model = st.selectbox("Model", ["deepseek-ai/DeepSeek-R1", "meta-llama/Llama-3.2-3B-Instruct"])
-    temp = st.slider("Creativity", 0.0, 1.0, 0.40)
-
+            
 # --- 6. Main Chat Logic ---
 if "current_chat_id" not in st.session_state:
     st.session_state.current_chat_id = "Chat 1"
