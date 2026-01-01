@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- 1. PAGE CONFIGURATION ---
-st.set_page_config(page_title="VibeCode Architect", layout="wide")
+st.set_page_config(page_title="The Blueprint", layout="wide")
 
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
@@ -103,7 +103,7 @@ db_history = load_user_chats(user_id)
 
 with st.sidebar:
     # TOP SECTION
-    st.title("VibeCode")
+    st.title("The Blueprint")
     st.write(f"User: **{username}**")
     st.divider()
     
