@@ -105,77 +105,51 @@ user_id = st.session_state.user_data.id
 username = st.session_state.username
 db_history = load_user_chats(user_id)
 
-# Custom CSS untuk merapikan Sidebar
-st.markdown("""
-    <style>
-        [data-testid="stSidebarNav"] {display: none;}
-        .stButton button {
-            border-radius: 5px;
-            text-align: left;
-            padding-left: 10px;
-        }
-        .block-container {padding-top: 2rem;}
-    </style>
-""", unsafe_allow_html=True)
-
 with st.sidebar:
-    # 1. HEADER SECTION
     st.title("The Blueprint")
     st.write(f"User: **{username}**")
-    st.caption("● System Online") # Indikator status
-    st.divider()
-    
-    # 2. ACTIONS SECTION
-    st.subheader("Workspace")
-    if st.button("+ Create New Blueprint", use_container_width=True, type="primary"):
+    if st.button("+ New Blueprint", use_container_width=False):
         st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
         st.session_state.messages = [{"role": "assistant", "content": "New architectural session started."}]
         st.rerun()
-    
-    st.write("") # Spacer kecil
-    
-    # 3. HISTORY SECTION
-    st.subheader("Archive")
-    # Container dengan height terbatas agar jika history banyak, muncul scrollbar
-    history_container = st.container(height=300, border=False)
-    with history_container:
-        if not db_history:
-            st.info("No saved blueprints.")
-        for cid in db_history.keys():
-            # Highlight chat yang sedang aktif
-            is_active = " (Active)" if cid == st.session_state.current_chat_id else ""
-            if st.button(f"{cid}{is_active}", key=f"btn_{cid}", use_container_width=True):
-                st.session_state.current_chat_id = cid
-                st.session_state.messages = db_history[cid]
-                st.rerun()
-
-    # 4. FOOTER SECTION (SETTINGS)
-    # Menggunakan container untuk memisahkan settings ke area bawah
     st.divider()
-    with st.expander("⚙️ System Control"):
-        st.write("Model Settings")
+    
+    st.write("### History")
+    for cid in db_history.keys():
+        if st.button(cid, key=f"btn_{cid}", use_container_width=True):
+            st.session_state.current_chat_id = cid
+            st.session_state.messages = db_history[cid]
+            st.rerun()
+
+    for _ in range(10): st.write("") 
+    
+    st.divider()
+    with st.expander("⚙️ Settings"):
+        # 1. Temperature Slider
         st.session_state.temp = st.slider(
-            "Creativity", 
+            "Architect Creativity", 
             min_value=0.0, max_value=1.0, 
             value=st.session_state.temp, 
-            step=0.1
+            step=0.1,
+            help="Low: Precise code. High: Creative design."
         )
         
-        st.divider()
-        st.write("Data Management")
-        if st.button("Clear All History", use_container_width=True):
+        # 2. Clear History Button
+        if st.button("Clear All Blueprints", use_container_width=True):
             try:
                 supabase.table("chat_history").delete().eq("user_id", user_id).execute()
                 st.session_state.messages = [{"role": "assistant", "content": "All history cleared."}]
                 st.session_state.current_chat_id = "Main Blueprint"
                 st.rerun()
             except Exception as e:
-                st.error("Failed to clear.")
+                st.error(f"Clear failed: {e}")
 
-        if st.button("Logout Session", use_container_width=True, type="primary"):
+        st.divider()
+        if st.button("Logout", use_container_width=True, type="primary"):
             supabase.auth.sign_out()
             st.session_state.clear()
             st.rerun()
+
 # --- 7. CHAT LOGIC ---
 if "messages" not in st.session_state:
     if db_history:
