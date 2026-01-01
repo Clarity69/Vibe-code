@@ -17,9 +17,7 @@ load_dotenv()
 # --- 1. Konfigurasi Halaman ---
 st.set_page_config(page_title="VibeCode AI", layout="wide")
 
-USER_ICON = "👤" 
-AI_ICON = "🤖"
-# MODEL DEDIKASI (Bisa diganti ID-nya di sini saja)
+# MODEL DEDIKASI
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # --- 2. Inisialisasi DB & Cookie ---
@@ -32,7 +30,7 @@ def init_supabase():
 supabase = init_supabase()
 cookie_manager = stx.CookieManager()
 
-# --- 3. Logika Identitas Otomatis (Anti-Refresh) ---
+# --- 3. Logika Identitas Otomatis ---
 if "user_uuid" not in st.session_state:
     time.sleep(0.6)
     saved_uuid = cookie_manager.get("vibecode_user_id")
@@ -59,14 +57,6 @@ def load_user_chats():
         return {item['chat_id']: item['messages'] for item in res.data}
     except: return {}
 
-def read_document(file):
-    name = file.name.lower()
-    if name.endswith('.pdf'):
-        return "".join([p.extract_text() or "" for p in PdfReader(file).pages])
-    elif name.endswith('.docx'):
-        return "\n".join([p.text for p in Document(file).paragraphs])
-    return file.read().decode("utf-8")
-
 # --- 5. Inisialisasi State Chat ---
 db_history = load_user_chats()
 
@@ -78,7 +68,7 @@ if "current_chat_id" not in st.session_state:
 
 if "messages" not in st.session_state:
     st.session_state.messages = db_history.get(st.session_state.current_chat_id, [
-        {"role": "assistant", "content": "Wassup! VibeCode AI siap membantu."}
+        {"role": "assistant", "content": "Wassup! Judge siap memberikan keputusan."}
     ])
 
 # --- 6. Sidebar ---
@@ -98,50 +88,63 @@ with st.sidebar:
             st.session_state.messages = db_history[cid]
             st.rerun()
 
-# --- 7. Main Chat Display ---
-for msg in st.session_state.messages:
-    content = msg["content"]
-    if msg["role"] == "user" and "[Isi Dokumen:" in content:
-        content = content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
-    with st.chat_message(msg["role"], avatar=USER_ICON if msg["role"]=="user" else AI_ICON):
-        st.markdown(content)
+# --- 7. Main Chat Display (Tanpa Avatar) ---
+chat_placeholder = st.container()
+
+with chat_placeholder:
+    for msg in st.session_state.messages:
+        content = msg["content"]
+        if msg["role"] == "user":
+            # Filter tampilan dokumen di chat
+            if "[Isi Dokumen:" in content:
+                content = content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
+            st.markdown(f"**YOU:** {content}")
+        else:
+            st.markdown(f"**Judge:** {content}")
+        st.write("") # Memberi jarak antar pesan
 
 # Input Chat
-if prompt := st.chat_input("Message VibeCode..."):
-    # (Logika pengolahan file tetap sama jika kamu ingin menambahkan accept_file=True kembali)
+if prompt := st.chat_input("Input Here..."):
+    # Tampilkan input user secara instan
     st.session_state.messages.append({"role": "user", "content": prompt})
+    st.rerun() # Rerun agar pesan YOU muncul sebelum Judge mulai mengetik
+
+# Logika Respon Judge (Jika pesan terakhir dari User)
+if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    full_response = ""
+    # Header Judge untuk streaming
+    st.write("**Judge:**")
+    res_box = st.empty()
     
-    with st.chat_message("user", avatar=USER_ICON):
-        st.markdown(prompt)
+    TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+    HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+    payload = {"model": DEDICATED_MODEL, "messages": st.session_state.messages, "temperature": 0.4, "stream": True}
 
-    with st.chat_message("assistant", avatar=AI_ICON):
-        placeholder = st.empty()
-        full_response = ""
-        TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-        HEADERS = {"Authorization": f"Bearer {TOKEN}"}
-        payload = {"model": DEDICATED_MODEL, "messages": st.session_state.messages, "temperature": 0.4, "stream": True}
-
-        try:
-            resp = requests.post("https://router.huggingface.co/v1/chat/completions", headers=HEADERS, json=payload, stream=True)
-            for line in resp.iter_lines():
-                if line:
-                    line_text = line.decode('utf-8')
-                    if line_text.startswith("data: "):
-                        data_str = line_text[6:]
-                        if data_str.strip() == "[DONE]": break
-                        try:
-                            token = json.loads(data_str)["choices"][0]["delta"].get("content", "")
-                            full_response += token
-                            
-                            # Bersihkan tag think secara real-time
-                            clean_view = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
-                            clean_view = re.sub(r'<think>.*', '', clean_view, flags=re.DOTALL)
-                            placeholder.markdown(clean_view + "▌")
-                        except: continue
-            
-            final_clean = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
-            placeholder.markdown(final_clean)
-            st.session_state.messages.append({"role": "assistant", "content": final_clean})
-            save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
-        except Exception as e:
-            st.error(f"Error: {e}")
+    try:
+        resp = requests.post("https://router.huggingface.co/v1/chat/completions", headers=HEADERS, json=payload, stream=True)
+        for line in resp.iter_lines():
+            if line:
+                line_text = line.decode('utf-8')
+                if line_text.startswith("data: "):
+                    data_str = line_text[6:]
+                    if data_str.strip() == "[DONE]": break
+                    try:
+                        token = json.loads(data_str)["choices"][0]["delta"].get("content", "")
+                        full_response += token
+                        
+                        # Bersihkan tag think secara real-time
+                        clean_view = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
+                        clean_view = re.sub(r'<think>.*', '', clean_view, flags=re.DOTALL)
+                        res_box.markdown(clean_view + "▌")
+                    except: continue
+        
+        final_clean = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
+        res_box.markdown(final_clean)
+        
+        # Simpan ke state dan DB
+        st.session_state.messages.append({"role": "assistant", "content": final_clean})
+        save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
+        st.rerun() # Sinkronisasi tampilan akhir
+        
+    except Exception as e:
+        st.error(f"Error: {e}")
