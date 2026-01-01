@@ -113,7 +113,7 @@ def display_chat():
                     content = content.split("\n\n[Isi Dokumen:")[0] + " *(inserted file)*"
                 st.markdown(f"**:blue[YOU:]** {content}")
             else:
-                st.markdown(f"**:green[Judge:]** {content}")
+                st.markdown(f"**:green[Architect:]** {content}")
             st.write("---")
 
 display_chat()
@@ -146,7 +146,7 @@ if prompt_data := st.chat_input("Input Here...", accept_file=True):
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     full_response = ""
     with chat_placeholder:
-        st.markdown("**:green[Judge:]**")
+        st.markdown("**:green[Architect:]**")
         res_box = st.empty()
         
         TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
