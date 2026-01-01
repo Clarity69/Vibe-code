@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- 1. PAGE CONFIGURATION ---
-st.set_page_config(page_title="VibeCode Architect", layout="wide", page_icon="🏗️")
+st.set_page_config(page_title="VibeCode Architect", layout="wide")
 
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
@@ -69,7 +69,7 @@ def save_chat_to_db(user_id, chat_id, messages, username):
 
 # --- 5. AUTHENTICATION UI ---
 if "user_data" not in st.session_state:
-    st.title("🏗️ VibeCode Architect")
+    st.title("VibeCode Architect")
     tab_login, tab_reg = st.tabs(["Login", "Register"])
     
     with tab_login:
@@ -114,7 +114,7 @@ if "messages" not in st.session_state:
 
 # --- 7. SIDEBAR ---
 with st.sidebar:
-    st.title("🏗️ VibeCode")
+    st.title("VibeCode")
     st.write(f"User: **{username}**")
     if st.button("Logout", use_container_width=True):
         supabase.auth.sign_out()
@@ -132,20 +132,20 @@ with st.sidebar:
             st.session_state.messages = db_history[cid]
             st.rerun()
 
-# --- 8. CHAT AREA (NO AVATARS) ---
+# --- 8. CHAT AREA ---
 st.caption(f"Project Session: {st.session_state.current_chat_id}")
 
 for msg in st.session_state.messages:
-    # Logic for: Username: prompt
     if msg["role"] == "user":
         content = msg["content"]
         if "[Document Content:" in content:
-            content = content.split("\n\n[Document Content:")[0] + " 📄 *(Files attached)*"
-        st.markdown(f"**{username}**: {content}")
+            content = content.split("\n\n[Document Content:")[0] + " (Files attached)"
+        # USER: BLUE
+        st.markdown(f"**:blue[{username}]**: {content}")
     else:
-        # Architect: response
-        st.markdown(f"**Architect**: {msg['content']}")
-    st.write("") # Spacer
+        # ARCHITECT: GREEN
+        st.markdown(f"**:green[Architect]**: {msg['content']}")
+    st.write("") 
 
 if prompt_data := st.chat_input("Input system requirements...", accept_file=True):
     user_text = prompt_data.text
@@ -158,7 +158,8 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
 
 # AI Response
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    with st.chat_message("assistant", avatar=None): # Hidden avatar
+    # Using chat_message with avatar=None to act as a container
+    with st.chat_message("assistant", avatar=None):
         res_box = st.empty()
         full_res = ""
         TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
@@ -177,9 +178,10 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                     if data.startswith("data: ") and "[DONE]" not in data:
                         token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
                         full_res += token
-                        res_box.markdown(f"**Architect**: {full_res}▌")
+                        # Streaming display
+                        res_box.markdown(f"**:green[Architect]**: {full_res}▌")
             
-            res_box.markdown(f"**Architect**: {full_res}")
+            res_box.markdown(f"**:green[Architect]**: {full_res}")
             st.session_state.messages.append({"role": "assistant", "content": full_res})
             save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
             st.rerun()
