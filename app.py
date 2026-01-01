@@ -99,9 +99,9 @@ with chat_placeholder:
         if msg["role"] == "user":
             if "[Isi Dokumen:" in content:
                 content = content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
-            st.markdown(f"#### :blue[YOU:] \n {content}")
+            st.markdown(f"**:blue[Me:]** \n {content}")
         else:
-            st.markdown(f"#### :green[Judge:] \n {content}")
+            st.markdown(f"**:green[Judge:**] \n {content}")
         st.write("---")
 
 # Input Chat
