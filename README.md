@@ -1,6 +1,6 @@
 # The Blueprint: Your Intelligent Workstation
 
-**VibeCode AI** is a modern artificial intelligence (AI) assistant platform that combines the power of the latest Large Language Models (LLMs) with secure database management. This application is designed to provide a seamless chat experience, capable of reading complex documents and keeping your conversation history secure.
+**The Blueprint** is a modern artificial intelligence (AI) assistant platform that combines the power of the latest Large Language Models (LLMs) with secure database management. This application is designed to provide a seamless chat experience, capable of reading complex documents and keeping your conversation history secure.
 
 ---
 
