@@ -22,7 +22,6 @@ AI_ICON = "🤖"
 # --- 2. Inisialisasi Database & Cookie ---
 @st.cache_resource
 def init_supabase():
-    # Mengambil dari secrets (Streamlit Cloud) atau .env (Lokal)
     url = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
     key = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
     return create_client(url, key)
@@ -30,10 +29,9 @@ def init_supabase():
 supabase = init_supabase()
 cookie_manager = stx.CookieManager()
 
-# --- 3. Logika Identitas Otomatis (Fix Refresh) ---
+# --- 3. Logika Identitas (Cookie) ---
 if "user_uuid" not in st.session_state:
-    # Jeda tipis agar browser sempat kirim cookie
-    time.sleep(0.6)
+    time.sleep(0.6) # Jeda untuk sinkronisasi cookie
     saved_uuid = cookie_manager.get("vibecode_user_id")
     
     if saved_uuid:
@@ -45,17 +43,13 @@ if "user_uuid" not in st.session_state:
                            expires_at=datetime.datetime.now() + datetime.timedelta(days=30))
         st.rerun()
 
-# --- 4. Fungsi Helper Database ---
+# --- 4. Fungsi Helper ---
 def save_chat_to_db(chat_id, messages):
     try:
-        data = {
-            "user_id": st.session_state.user_uuid,
-            "chat_id": chat_id,
-            "messages": messages
-        }
+        data = {"user_id": st.session_state.user_uuid, "chat_id": chat_id, "messages": messages}
         supabase.table("chat_history").upsert(data, on_conflict="user_id,chat_id").execute()
     except Exception as e:
-        print(f"Gagal simpan DB: {e}")
+        print(f"Error DB: {e}")
 
 def load_user_chats():
     try:
@@ -65,29 +59,25 @@ def load_user_chats():
         return {}
 
 def read_document(file):
-    name = file.name.lower()
     try:
-        if name.endswith('.pdf'):
+        if file.name.lower().endswith('.pdf'):
             return "".join([p.extract_text() or "" for p in PdfReader(file).pages])
-        elif name.endswith('.docx'):
+        elif file.name.lower().endswith('.docx'):
             return "\n".join([p.text for p in Document(file).paragraphs])
         return file.read().decode("utf-8")
     except:
-        return "[Gagal membaca dokumen]"
+        return "[Error membaca dokumen]"
 
-# --- 5. Inisialisasi State Chat (PENTING: Cegah NameError) ---
-# Kita load history DULU sebelum masuk ke sidebar atau main logic
+# --- 5. Inisialisasi State Chat ---
 db_history = load_user_chats()
 
 if "current_chat_id" not in st.session_state:
     if db_history:
-        # Kembalikan ke chat terakhir yang ada di database
         st.session_state.current_chat_id = sorted(db_history.keys(), reverse=True)[0]
     else:
         st.session_state.current_chat_id = "Chat 1"
 
 if "messages" not in st.session_state:
-    # Ambil pesan dari DB, jika tidak ada pakai sapaan default
     st.session_state.messages = db_history.get(
         st.session_state.current_chat_id, 
         [{"role": "assistant", "content": "wassup folks!"}]
@@ -96,15 +86,14 @@ if "messages" not in st.session_state:
 # --- 6. Sidebar UI ---
 with st.sidebar:
     st.title("VibeCode")
-    st.caption(f"User ID: {st.session_state.user_uuid[:8]}...")
+    st.caption(f"ID: {st.session_state.user_uuid[:8]}")
     
     if st.button("+ New Chat", use_container_width=True):
-        new_chat_name = f"Chat {len(db_history) + 1}"
-        st.session_state.current_chat_id = new_chat_name
+        st.session_state.current_chat_id = f"Chat {len(db_history) + 1}"
         st.session_state.messages = [{"role": "assistant", "content": "Ada yang bisa dibantu?"}]
         st.rerun()
 
-    st.write("### Chat History")
+    st.write("### Riwayat Chat")
     for cid in sorted(db_history.keys(), reverse=True):
         if st.button(cid, key=f"btn_{cid}", use_container_width=True):
             st.session_state.current_chat_id = cid
@@ -116,47 +105,47 @@ with st.sidebar:
     temp = st.slider("Creativity", 0.0, 1.0, 0.40)
 
 # --- 7. Main Chat Display & Logic ---
-# Input Chat
+
+# A. Tampilkan chat yang sudah ada (Agar tidak menghilang)
+for msg in st.session_state.messages:
+    display_content = msg["content"]
+    # Sembunyikan teks dokumen yang panjang dari tampilan bubble
+    if msg["role"] == "user" and "[Isi Dokumen:" in display_content:
+        display_content = display_content.split("\n\n[Isi Dokumen:")[0] + " *(dengan lampiran)*"
+    
+    with st.chat_message(msg["role"], avatar=USER_ICON if msg["role"]=="user" else AI_ICON):
+        st.markdown(display_content)
+
+# B. Input Chat
 if prompt := st.chat_input("Message VibeCode...", accept_file=True):
     user_text = prompt.text if hasattr(prompt, 'text') else prompt
-    uploaded_files = prompt.files if hasattr(prompt, 'files') else []
+    files = prompt.files if hasattr(prompt, 'files') else []
     
+    # Proses dokumen
     file_context = ""
-    for f in uploaded_files:
-        content = read_document(f)
-        file_context += f"\n\n[Isi Dokumen: {f.name}]\n{content}\n"
+    for f in files:
+        file_context += f"\n\n[Isi Dokumen: {f.name}]\n{read_document(f)}\n"
+    
+    # Simpan pesan user
+    full_user_input = user_text + file_context
+    st.session_state.messages.append({"role": "user", "content": full_user_input})
+    
+    # Tampilkan bubble user secara instan
+    with st.chat_message("user", avatar=USER_ICON):
+        st.markdown(user_text if not files else f"{user_text} *(Mengunggah {len(files)} file)*")
 
-    final_prompt = user_text + file_context
-    
-    # MASUKKAN PESAN USER KE STATE SEBELUM GENERATE
-    st.session_state.messages.append({"role": "user", "content": final_prompt})
-    
-    # Simpan ke DB segera agar tidak hilang jika koneksi putus tengah jalan
-    save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
-    
-    # Jalankan st.rerun() untuk menampilkan pesan user di UI sebelum AI membalas
-    st.rerun()
-
-# CEK APAKAH PESAN TERAKHIR DARI USER (Artinya butuh jawaban AI)
-if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    # Generate Respon AI
     with st.chat_message("assistant", avatar=AI_ICON):
         placeholder = st.empty()
         full_response = ""
         
-        # Konfigurasi API
         TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
         HEADERS = {"Authorization": f"Bearer {TOKEN}"}
         
-        # Bersihkan pesan dari tag thinking model sebelumnya jika ada
-        payload_messages = []
-        for m in st.session_state.messages:
-            clean_content = m["content"]
-            # Opsional: bersihkan output lama jika menggunakan DeepSeek agar tidak bingung
-            payload_messages.append({"role": m["role"], "content": clean_content})
-
+        # Kirim riwayat ke API (tanpa modifikasi agar model tetap punya konteks)
         payload = {
             "model": selected_model, 
-            "messages": payload_messages, 
+            "messages": st.session_state.messages, 
             "temperature": temp, 
             "stream": True
         }
@@ -164,10 +153,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
         try:
             resp = requests.post("https://router.huggingface.co/v1/chat/completions", headers=HEADERS, json=payload, stream=True)
             
-            # Cek status code sebelum looping
-            if resp.status_code != 200:
-                st.error(f"API Error ({resp.status_code}): {resp.text}")
-            else:
+            if resp.status_code == 200:
                 for line in resp.iter_lines():
                     if line:
                         line_text = line.decode('utf-8')
@@ -182,9 +168,12 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                             except: continue
                 
                 placeholder.markdown(full_response)
-                # SIMPAN JAWABAN AI
+                # Simpan jawaban ke state dan Database
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
                 save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
-                st.rerun() # Refresh agar UI sinkron
+            else:
+                st.error(f"API Error: {resp.status_code}")
         except Exception as e:
-            st.error(f"Koneksi AI terputus: {e}")
+            st.error(f"Koneksi terputus: {e}")
+    
+    # Penting: Jangan gunakan rerun di sini agar bubble tidak berkedip/hilang saat proses streaming
