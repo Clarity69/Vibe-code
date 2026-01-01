@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="VibeCode AI", layout="wide", page_icon="🚀")
+# --- 1. PAGE CONFIGURATION ---
+st.set_page_config(page_title="VibeCode AI", layout="wide")
 
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
@@ -27,7 +27,19 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- 3. HELPER FUNCTIONS ---
+# --- 3. SESSION PERSISTENCE LOGIC ---
+# Check if there is an active session in Supabase when the app loads
+if "user_data" not in st.session_state:
+    try:
+        session = supabase.auth.get_session()
+        if session and session.user:
+            st.session_state.user_data = session.user
+            # Fetch username from metadata or fallback to email prefix
+            st.session_state.username = session.user.user_metadata.get("username", session.user.email.split('@')[0])
+    except:
+        pass
+
+# --- 4. HELPER FUNCTIONS ---
 def read_document(file):
     try:
         name = file.name.lower()
@@ -37,7 +49,7 @@ def read_document(file):
             return "\n".join([p.text for p in Document(file).paragraphs])
         return file.read().decode("utf-8")
     except Exception as e:
-        return f"\n[Error membaca file {file.name}: {e}]\n"
+        return f"\n[Error reading file {file.name}: {e}]\n"
 
 def load_user_chats(user_id):
     try:
@@ -46,146 +58,142 @@ def load_user_chats(user_id):
     except:
         return {}
 
-def save_chat_to_db(user_id, chat_id, messages):
+def save_chat_to_db(user_id, chat_id, messages, username=None):
     try:
         data = {
             "user_id": user_id, 
             "chat_id": chat_id, 
             "messages": messages,
+            "username": username,
             "last_updated": datetime.datetime.now().isoformat()
         }
         supabase.table("chat_history").upsert(data, on_conflict="user_id,chat_id").execute()
-    except Exception as e:
-        st.error(f"Gagal simpan cloud: {e}")
+    except:
+        pass
 
-# --- 4. AUTH LOGIC ---
+# --- 5. AUTHENTICATION UI ---
 if "user_data" not in st.session_state:
     st.title("🚀 VibeCode AI")
-    st.info("Satu akun untuk semua kodinganmu. Masuk atau Daftar dulu!")
+    st.info("Your personal coding companion. Login or Register to continue.")
     
-    tab_login, tab_reg = st.tabs(["Login", "Daftar Baru"])
+    tab_login, tab_reg = st.tabs(["Login", "Register"])
     
     with tab_login:
-        with st.form("form_login"):
+        with st.form("login_form"):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
-            btn_login = st.form_submit_button("Masuk", use_container_width=True)
+            btn_login = st.form_submit_button("Login", use_container_width=True)
             if btn_login:
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                     st.session_state.user_data = res.user
-                    st.success("Berhasil masuk!")
-                    time.sleep(1)
+                    st.session_state.username = res.user.user_metadata.get("username", email.split('@')[0])
+                    st.success("Login successful!")
+                    time.sleep(0.5)
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Gagal login: {e}")
+                    st.error(f"Login failed: {e}")
 
     with tab_reg:
-        with st.form("form_reg"):
-            email_r = st.text_input("Email Baru")
-            pass_r = st.text_input("Password Baru (Min 6 karakter)", type="password")
-            btn_reg = st.form_submit_button("Daftar Sekarang", use_container_width=True)
+        with st.form("register_form"):
+            u_name = st.text_input("Username")
+            email_r = st.text_input("Email Address")
+            pass_r = st.text_input("New Password (Min 6 chars)", type="password")
+            btn_reg = st.form_submit_button("Create Account", use_container_width=True)
             if btn_reg:
                 try:
-                    supabase.auth.sign_up({"email": email_r, "password": pass_r})
-                    st.success("Berhasil daftar! Silahkan coba Login.")
+                    supabase.auth.sign_up({
+                        "email": email_r, 
+                        "password": pass_r,
+                        "options": {"data": {"username": u_name}}
+                    })
+                    st.success("Registration successful! You can now log in.")
                 except Exception as e:
-                    st.error(f"Gagal daftar: {e}")
+                    st.error(f"Registration failed: {e}")
     st.stop()
 
-# --- 5. CHAT SYSTEM (Jika sudah login) ---
+# --- 6. CHAT INTERFACE (Logged In) ---
 user_id = st.session_state.user_data.id
+username_display = st.session_state.get("username", st.session_state.user_data.email)
 db_history = load_user_chats(user_id)
 
-# Inisialisasi State Chat
 if "messages" not in st.session_state:
     if db_history:
-        # Load chat terakhir yang pernah dibuka
         latest_id = list(db_history.keys())[0]
         st.session_state.current_chat_id = latest_id
         st.session_state.messages = db_history[latest_id]
     else:
-        st.session_state.current_chat_id = "Chat 1"
-        st.session_state.messages = [{"role": "assistant", "content": f"Halo {st.session_state.user_data.email}! Mau bikin kode apa hari ini?"}]
+        st.session_state.current_chat_id = "Initial Chat"
+        st.session_state.messages = [{"role": "assistant", "content": f"Hi {username_display}! Ready to write some code?"}]
 
-# --- 6. SIDEBAR (History & Logout) ---
+# --- 7. SIDEBAR ---
 with st.sidebar:
     st.title("VibeCode AI")
-    st.write(f"👤 {st.session_state.user_data.email}")
+    st.write(f"👋 Welcome, **{username_display}**")
     
     if st.button("Logout", type="secondary", use_container_width=True):
         supabase.auth.sign_out()
-        del st.session_state.user_data
+        if "user_data" in st.session_state: del st.session_state.user_data
+        if "messages" in st.session_state: del st.session_state.messages
         st.rerun()
         
     st.divider()
     if st.button("+ New Chat", use_container_width=True, type="primary"):
         st.session_state.current_chat_id = f"Chat {len(db_history) + 1}"
-        st.session_state.messages = [{"role": "assistant", "content": "Chat baru dimulai. Kirim kode atau file!"}]
+        st.session_state.messages = [{"role": "assistant", "content": "New session started! Feel free to upload files."}]
         st.rerun()
 
-    st.write("### Riwayat Chat")
+    st.write("### Chat History")
     for cid in db_history.keys():
         if st.button(cid, key=f"btn_{cid}", use_container_width=True):
             st.session_state.current_chat_id = cid
             st.session_state.messages = db_history[cid]
             st.rerun()
 
-# --- 7. MAIN UI CHAT ---
-st.subheader(f"📂 {st.session_state.current_chat_id}")
+# --- 8. MAIN CHAT AREA ---
+st.subheader(f"Current Session: {st.session_state.current_chat_id}")
 
-# Display messages
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar="👤" if msg["role"]=="user" else "🤖"):
         content = msg["content"]
-        # Membersihkan tampilan UI dari isi dokumen yang panjang
-        if msg["role"] == "user" and "[Isi Dokumen:" in content:
-            display_text = content.split("\n\n[Isi Dokumen:")[0] + " 📄 *(File terlampir)*"
+        if msg["role"] == "user" and "[Document Content:" in content:
+            # Clean up the UI from large file dumps
+            display_text = content.split("\n\n[Document Content:")[0] + " 📄 *(Files attached)*"
             st.markdown(display_text)
         else:
             st.markdown(content)
 
-# Input dengan Upload File
-if prompt_data := st.chat_input("Tanya sesuatu atau lampirkan file...", accept_file=True):
+if prompt_data := st.chat_input("Ask a question or drop files...", accept_file=True):
     user_text = prompt_data.text
-    uploaded_files = prompt_data.files
-    
-    # Baca konten file jika ada
     file_context = ""
-    for f in uploaded_files:
-        file_context += f"\n\n[Isi Dokumen: {f.name}]\n{read_document(f)}\n"
+    for f in prompt_data.files:
+        file_context += f"\n\n[Document Content: {f.name}]\n{read_document(f)}\n"
     
     final_prompt = user_text + file_context
     st.session_state.messages.append({"role": "user", "content": final_prompt})
     
-    # Beri judul otomatis jika masih "Chat X"
-    if st.session_state.current_chat_id.startswith("Chat ") and user_text:
-        st.session_state.current_chat_id = (user_text[:30] + '...') if len(user_text) > 30 else user_text
-    
+    # Auto-rename chat session based on first prompt
+    if st.session_state.current_chat_id.startswith("Chat ") or st.session_state.current_chat_id == "Initial Chat":
+        if user_text:
+            st.session_state.current_chat_id = (user_text[:30] + '...') if len(user_text) > 30 else user_text
     st.rerun()
 
-# Logika Respon AI
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     with st.chat_message("assistant", avatar="🤖"):
         res_box = st.empty()
         full_response = ""
-        
         TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
         HEADERS = {"Authorization": f"Bearer {TOKEN}"}
         
-        # System prompt agar AI selalu disiplin pakai Markdown (fitur copy code)
-        messages_to_send = [
-            {"role": "system", "content": "You are VibeCode AI. Always use markdown for code blocks. Be concise and helpful."}
-        ] + st.session_state.messages
+        system_msg = [{"role": "system", "content": "You are VibeCode AI. An expert developer. Always wrap code in markdown blocks with language tags."}]
         
         try:
             resp = requests.post(
                 "https://router.huggingface.co/v1/chat/completions",
                 headers=HEADERS,
-                json={"model": DEDICATED_MODEL, "messages": messages_to_send, "temperature": 0.3, "stream": True},
+                json={"model": DEDICATED_MODEL, "messages": system_msg + st.session_state.messages, "temperature": 0.3, "stream": True},
                 stream=True
             )
-            
             for line in resp.iter_lines():
                 if line:
                     line_text = line.decode('utf-8')
@@ -200,9 +208,8 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
             
             res_box.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
-            # Simpan ke DB Cloud
-            save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages)
+            # Save to Cloud DB
+            save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username_display)
             st.rerun()
-            
         except Exception as e:
-            st.error(f"Koneksi terputus: {e}")
+            st.error(f"Connection lost: {e}")
