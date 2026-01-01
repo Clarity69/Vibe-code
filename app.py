@@ -6,6 +6,7 @@ import uuid
 import bcrypt
 import datetime
 import extra_streamlit_components as stx
+import time
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from docx import Document
