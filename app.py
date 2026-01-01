@@ -83,7 +83,7 @@ with st.sidebar:
             st.rerun()
     
     st.divider()
-    selected_model = st.selectbox("Model", ["deepseek-ai/DeepSeek-R1", "meta-llama/Llama-3.2-3B-Instruct"])
+    selected_model = st.selectbox("Model", ["meta-llama/Llama-3.2-3B-Instruct","deepseek-ai/DeepSeek-R1"])
     temp = st.slider("Creativity", 0.0, 1.0, 0.40)
 
 # --- 6. Main Chat Logic ---
