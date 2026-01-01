@@ -108,7 +108,7 @@ if "logged_in" not in st.session_state:
 if not st.session_state.logged_in:
     cols = st.columns([1, 1.5, 1])
     with cols[1]:
-        st.title("🔐 VibeCode AI")
+        st.title("VibeCode AI")
         tab1, tab2 = st.tabs(["Masuk", "Daftar Akun"])
         
         with tab1:
