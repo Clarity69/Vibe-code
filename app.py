@@ -65,7 +65,7 @@ with st.sidebar:
 # --- 3. State & Welcome Message ---
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Halo! Saya **VibeCode AI**. Saya bisa membaca PDF, Word, atau Kode. Apa yang ingin kita bahas hari ini? 🚀"}
+        {"role": "assistant", "content": "Halo! I'm **VibeCode AI**. what can i help ya?"}
     ]
 
 for msg in st.session_state.messages:
