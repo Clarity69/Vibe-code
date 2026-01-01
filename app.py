@@ -36,12 +36,8 @@ def init_supabase():
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
-# HAPUS @st.cache_resource di sini karena menyebabkan CachedWidgetWarning
-def get_cookie_manager():
-    return stx.CookieManager()
-
 supabase = init_supabase()
-cookie_manager = get_cookie_manager() # Panggil tanpa cache
+cookie_manager = stx.CookieManager() # Inisialisasi langsung
 # --- 3. Fungsi Keamanan (Auth) ---
 def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -94,9 +90,13 @@ def read_document(file):
     except Exception as e:
         return f"[Error membaca file: {e}]"
 
-# --- 5. Logika Stay Logged In (Cookies) ---
+# --- 5. Logika Stay Logged In (Ditingkatkan dengan Jeda Waktu) ---
 if "logged_in" not in st.session_state:
+    # Berikan jeda 0.5 - 1 detik agar CookieManager sempat membaca data dari browser
+    time.sleep(0.6) 
+    
     saved_user = cookie_manager.get("vibecode_user")
+    
     if saved_user:
         st.session_state.logged_in = True
         st.session_state.username = saved_user
