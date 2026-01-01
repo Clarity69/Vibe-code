@@ -3,47 +3,56 @@ import requests
 import json
 import os
 from dotenv import load_dotenv
+from PyPDF2 import PdfReader
+from docx import Document
 
 load_dotenv()
 
 # --- 1. Konfigurasi Halaman ---
 st.set_page_config(page_title="VibeCode", layout="wide")
 
-# CUSTOM ICONS
 USER_ICON = "👤" 
 AI_ICON = "🤖"
 
-# Custom CSS untuk tampilan slider dan estetika
+# --- STYLE CSS (Slider & UI) ---
 st.markdown("""
     <style>
-    /* Slider: Mengubah warna track (garis) dan thumb (titik) menjadi merah */
     div[data-baseweb="slider"] > div:first-child > div:first-child {
         background: linear-gradient(to right, rgb(255, 75, 75) 0%, rgb(255, 75, 75) var(--slider-value), rgba(151, 166, 195, 0.25) var(--slider-value));
-    }
-    div[data-testid="stThumbValue"] {
-        color: #ff4b4b;
     }
     span[data-baseweb="slider-thumb"] {
         background-color: #ff4b4b;
         border: 2px solid #ff4b4b;
     }
-    /* Sembunyikan navigasi default jika perlu */
     [data-testid="stSidebarNav"] {display: none;}
     </style>
 """, unsafe_allow_html=True)
+
+# --- FUNGSI PEMBACA DOKUMEN ---
+def read_document(file):
+    name = file.name.lower()
+    if name.endswith('.pdf'):
+        pdf_reader = PdfReader(file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() or ""
+        return text
+    elif name.endswith('.docx'):
+        doc = Document(file)
+        return "\n".join([para.text for para in doc.paragraphs])
+    else: 
+        return file.read().decode("utf-8")
 
 # --- 2. Sidebar Layout ---
 with st.sidebar:
     st.title("VibeCode")
     
-    # Tombol New Chat yang hanya menghapus memori browser user tersebut (Private)
     if st.button("New Chat", use_container_width=True):
         st.session_state.messages = [
-            {"role": "assistant", "content": "Sesi telah direset. Ada yang bisa saya bantu lagi? 🚀"}
+            {"role": "assistant", "content": "Halo! Sesi telah direset. Ada yang bisa saya bantu? 🚀"}
         ]
         st.rerun()
     
-    # Spacer untuk mendorong setting ke bawah
     st.markdown("<br>" * 18, unsafe_allow_html=True)
     st.divider()
     
@@ -53,44 +62,37 @@ with st.sidebar:
     )
     temp = st.slider("Creativity", 0.0, 1.0, 0.40)
 
-# --- 3. State & History Display ---
-# Inisialisasi dengan Welcome Message jika chat masih kosong
+# --- 3. State & Welcome Message ---
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {
-            "role": "assistant", 
-            "content": "Halo! I'm **VibeCode AI**. what can i help ya?"
-        }
+        {"role": "assistant", "content": "Halo! Saya **VibeCode AI**. Saya bisa membaca PDF, Word, atau Kode. Apa yang ingin kita bahas hari ini? 🚀"}
     ]
 
-# Tampilkan history chat
 for msg in st.session_state.messages:
     avatar = USER_ICON if msg["role"] == "user" else AI_ICON
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
-# --- 4. Chat Input Logic ---
+# --- 4. Chat Input & Document Logic ---
 if prompt := st.chat_input("Message VibeCode...", accept_file=True):
     
-    # Handle object prompt dari st.chat_input
     user_text = prompt.text if hasattr(prompt, 'text') else prompt
     files = prompt.files if hasattr(prompt, 'files') else []
 
     file_context = ""
     for f in files:
         try:
-            content = f.read().decode("utf-8")
-            file_context += f"\n\n[File: {f.name}]\n```\n{content}\n```"
-        except:
-            st.error(f"Gagal membaca {f.name}")
+            content = read_document(f)
+            file_context += f"\n\n[Isi Dokumen: {f.name}]\n{content}\n"
+        except Exception as e:
+            st.error(f"Gagal membaca {f.name}: {e}")
 
+    # Prompt akhir dikirim ke AI (dengan isi file), tapi di UI hanya tampil teks user
     final_prompt = user_text + file_context
 
-    # Tampilkan pesan user di UI
     with st.chat_message("user", avatar=USER_ICON):
-        st.markdown(final_prompt)
+        st.markdown(user_text if not files else f"{user_text} *(Mengunggah {len(files)} file)*")
     
-    # Simpan ke session_state (Privat untuk user ini saja)
     st.session_state.messages.append({"role": "user", "content": final_prompt})
 
     # --- 5. AI Generation ---
@@ -98,8 +100,18 @@ if prompt := st.chat_input("Message VibeCode...", accept_file=True):
         placeholder = st.empty()
         full_response = ""
         
-        # Ambil Token (Secrets untuk Cloud, .env untuk Lokal)
-        TOKEN = st.secrets["HF_TOKEN"] if "HF_TOKEN" in st.secrets else os.getenv("HF_TOKEN")
+        # LOGIKA TOKEN AMAN
+        TOKEN = os.getenv("HF_TOKEN")
+        if not TOKEN:
+            try:
+                if "HF_TOKEN" in st.secrets:
+                    TOKEN = st.secrets["HF_TOKEN"]
+            except: pass
+
+        if not TOKEN:
+            st.error("Token tidak ditemukan!")
+            st.stop()
+
         HEADERS = {"Authorization": f"Bearer {TOKEN}"}
         API_URL = "https://router.huggingface.co/v1/chat/completions"
         
@@ -128,7 +140,6 @@ if prompt := st.chat_input("Message VibeCode...", accept_file=True):
                         except: continue
             
             placeholder.markdown(full_response)
-            # Simpan balasan AI ke session_state
             st.session_state.messages.append({"role": "assistant", "content": full_response})
             
         except Exception as e:
