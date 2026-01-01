@@ -35,6 +35,10 @@ if "user_data" not in st.session_state:
     except:
         pass
 
+# Initialize settings in state
+if "temp" not in st.session_state:
+    st.session_state.temp = 0.4
+
 # --- 4. HELPERS ---
 def read_document(file):
     try:
@@ -102,7 +106,6 @@ username = st.session_state.username
 db_history = load_user_chats(user_id)
 
 with st.sidebar:
-    # TOP SECTION
     st.title("The Blueprint")
     st.write(f"User: **{username}**")
     st.divider()
@@ -119,17 +122,30 @@ with st.sidebar:
             st.session_state.messages = db_history[cid]
             st.rerun()
 
-    # PUSH CONTENT TO BOTTOM
-    # This creates flexible space
-    for _ in range(15): st.write("") 
+    for _ in range(10): st.write("") 
     
     st.divider()
-    # BOTTOM SECTION (Gear Icon / Settings)
     with st.expander("⚙️ Settings"):
-        # Theme toggle (Streamlit's internal theme is handled by user, 
-        # but we can add a visual indicator or extra settings here)
-        st.info("Theme follows system/browser settings.")
+        # 1. Temperature Slider
+        st.session_state.temp = st.slider(
+            "Architect Creativity", 
+            min_value=0.0, max_value=1.0, 
+            value=st.session_state.temp, 
+            step=0.1,
+            help="Low: Precise code. High: Creative design."
+        )
         
+        # 2. Clear History Button
+        if st.button("Clear All Blueprints", use_container_width=True):
+            try:
+                supabase.table("chat_history").delete().eq("user_id", user_id).execute()
+                st.session_state.messages = [{"role": "assistant", "content": "All history cleared."}]
+                st.session_state.current_chat_id = "Main Blueprint"
+                st.rerun()
+            except Exception as e:
+                st.error(f"Clear failed: {e}")
+
+        st.divider()
         if st.button("Logout", use_container_width=True, type="primary"):
             supabase.auth.sign_out()
             st.session_state.clear()
@@ -175,7 +191,12 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
             resp = requests.post(
                 "https://router.huggingface.co/v1/chat/completions",
                 headers={"Authorization": f"Bearer {TOKEN}"},
-                json={"model": DEDICATED_MODEL, "messages": sys_prompt + st.session_state.messages, "temperature": 0.4, "stream": True},
+                json={
+                    "model": DEDICATED_MODEL, 
+                    "messages": sys_prompt + st.session_state.messages, 
+                    "temperature": st.session_state.temp, # Linked to slider
+                    "stream": True
+                },
                 stream=True
             )
             for line in resp.iter_lines():
