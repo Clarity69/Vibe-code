@@ -83,7 +83,7 @@ with st.sidebar:
             st.rerun()
     
     st.divider()
-    selected_model = st.selectbox("Model", ["meta-llama/Llama-3.2-3B-Instruct", "deepseek-ai/DeepSeek-R1"])
+    selected_model = st.selectbox("Model", ["deepseek-ai/DeepSeek-R1", "meta-llama/Llama-3.2-3B-Instruct"])
     temp = st.slider("Creativity", 0.0, 1.0, 0.40)
 
 # --- 6. Main Chat Logic ---
@@ -92,7 +92,7 @@ if "current_chat_id" not in st.session_state:
 
 if "messages" not in st.session_state:
     st.session_state.messages = db_history.get(st.session_state.current_chat_id, [
-        {"role": "assistant", "content": "Halo! Ada yang bisa saya bantu?"}
+        {"role": "assistant", "content": "wassup folks!"}
     ])
 
 # Tampilkan Chat
