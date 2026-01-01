@@ -25,7 +25,7 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- 3. SESSION PERSISTENCE LOGIC ---
+# --- 3. SESSION PERSISTENCE ---
 if "user_data" not in st.session_state:
     try:
         session = supabase.auth.get_session()
@@ -35,7 +35,7 @@ if "user_data" not in st.session_state:
     except:
         pass
 
-# --- 4. HELPER FUNCTIONS ---
+# --- 4. HELPERS ---
 def read_document(file):
     try:
         name = file.name.lower()
@@ -71,7 +71,6 @@ def save_chat_to_db(user_id, chat_id, messages, username):
 if "user_data" not in st.session_state:
     st.title("VibeCode Architect")
     tab_login, tab_reg = st.tabs(["Login", "Register"])
-    
     with tab_login:
         with st.form("login_form"):
             email = st.text_input("Email")
@@ -84,7 +83,6 @@ if "user_data" not in st.session_state:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
-
     with tab_reg:
         with st.form("register_form"):
             u_name = st.text_input("Username")
@@ -98,11 +96,46 @@ if "user_data" not in st.session_state:
                     st.error(f"Failed: {e}")
     st.stop()
 
-# --- 6. INTERFACE SETUP ---
+# --- 6. SIDEBAR REORGANIZATION ---
 user_id = st.session_state.user_data.id
 username = st.session_state.username
 db_history = load_user_chats(user_id)
 
+with st.sidebar:
+    # TOP SECTION
+    st.title("VibeCode")
+    st.write(f"User: **{username}**")
+    st.divider()
+    
+    if st.button("+ New Blueprint", use_container_width=True):
+        st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
+        st.session_state.messages = [{"role": "assistant", "content": "New architectural session started."}]
+        st.rerun()
+    
+    st.write("### History")
+    for cid in db_history.keys():
+        if st.button(cid, key=f"btn_{cid}", use_container_width=True):
+            st.session_state.current_chat_id = cid
+            st.session_state.messages = db_history[cid]
+            st.rerun()
+
+    # PUSH CONTENT TO BOTTOM
+    # This creates flexible space
+    for _ in range(15): st.write("") 
+    
+    st.divider()
+    # BOTTOM SECTION (Gear Icon / Settings)
+    with st.expander("⚙️ Settings"):
+        # Theme toggle (Streamlit's internal theme is handled by user, 
+        # but we can add a visual indicator or extra settings here)
+        st.info("Theme follows system/browser settings.")
+        
+        if st.button("Logout", use_container_width=True, type="primary"):
+            supabase.auth.sign_out()
+            st.session_state.clear()
+            st.rerun()
+
+# --- 7. CHAT LOGIC ---
 if "messages" not in st.session_state:
     if db_history:
         latest_id = list(db_history.keys())[0]
@@ -112,27 +145,6 @@ if "messages" not in st.session_state:
         st.session_state.current_chat_id = "Main Blueprint"
         st.session_state.messages = [{"role": "assistant", "content": "Architect ready. System status: Online."}]
 
-# --- 7. SIDEBAR ---
-with st.sidebar:
-    st.title("VibeCode")
-    st.write(f"User: **{username}**")
-    if st.button("Logout", use_container_width=True):
-        supabase.auth.sign_out()
-        st.session_state.clear()
-        st.rerun()
-    st.divider()
-    if st.button("+ New Blueprint", use_container_width=True):
-        st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
-        st.session_state.messages = [{"role": "assistant", "content": "New architectural session started."}]
-        st.rerun()
-    st.write("### History")
-    for cid in db_history.keys():
-        if st.button(cid, key=f"btn_{cid}", use_container_width=True):
-            st.session_state.current_chat_id = cid
-            st.session_state.messages = db_history[cid]
-            st.rerun()
-
-# --- 8. CHAT AREA ---
 st.caption(f"Project Session: {st.session_state.current_chat_id}")
 
 for msg in st.session_state.messages:
@@ -140,10 +152,8 @@ for msg in st.session_state.messages:
         content = msg["content"]
         if "[Document Content:" in content:
             content = content.split("\n\n[Document Content:")[0] + " (Files attached)"
-        # USER: BLUE
         st.markdown(f"**:blue[{username}]**: {content}")
     else:
-        # ARCHITECT: GREEN
         st.markdown(f"**:green[Architect]**: {msg['content']}")
     st.write("") 
 
@@ -151,20 +161,16 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
     user_text = prompt_data.text
     file_ctx = "".join([f"\n\n[Document Content: {f.name}]\n{read_document(f)}\n" for f in prompt_data.files])
     st.session_state.messages.append({"role": "user", "content": user_text + file_ctx})
-    
     if st.session_state.current_chat_id.startswith("Blueprint") or st.session_state.current_chat_id == "Main Blueprint":
         st.session_state.current_chat_id = (user_text[:30] + '...') if len(user_text) > 30 else user_text
     st.rerun()
 
-# AI Response
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    # Using chat_message with avatar=None to act as a container
     with st.chat_message("assistant", avatar=None):
         res_box = st.empty()
         full_res = ""
         TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-        sys_prompt = [{"role": "system", "content": f"You are VibeCode Architect. Act as a senior software architect. Address the user as {username}. Use markdown for diagrams and code."}]
-        
+        sys_prompt = [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}. Use markdown."}]
         try:
             resp = requests.post(
                 "https://router.huggingface.co/v1/chat/completions",
@@ -178,9 +184,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                     if data.startswith("data: ") and "[DONE]" not in data:
                         token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
                         full_res += token
-                        # Streaming display
                         res_box.markdown(f"**:green[Architect]**: {full_res}▌")
-            
             res_box.markdown(f"**:green[Architect]**: {full_res}")
             st.session_state.messages.append({"role": "assistant", "content": full_res})
             save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
