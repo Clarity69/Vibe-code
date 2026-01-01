@@ -72,7 +72,7 @@ def save_chat_to_db(user_id, chat_id, messages, username):
 
 # --- 5. AUTHENTICATION UI ---
 if "user_data" not in st.session_state:
-    st.title("VibeCode Architect")
+    st.title("The Blueprint")
     tab_login, tab_reg = st.tabs(["Login", "Register"])
     with tab_login:
         with st.form("login_form"):
