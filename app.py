@@ -17,7 +17,6 @@ load_dotenv()
 # --- 1. Konfigurasi Halaman ---
 st.set_page_config(page_title="VibeCode AI", layout="wide")
 
-# MODEL DEDIKASI
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # --- 2. Inisialisasi DB & Cookie ---
@@ -30,21 +29,19 @@ def init_supabase():
 supabase = init_supabase()
 cookie_manager = stx.CookieManager()
 
-# --- 3. Logika Identitas Otomatis ---
+# --- 3. Logika Identitas ---
 if "user_uuid" not in st.session_state:
     time.sleep(0.6)
     saved_uuid = cookie_manager.get("vibecode_user_id")
-    
     if saved_uuid:
         st.session_state.user_uuid = saved_uuid
     else:
         new_id = str(uuid.uuid4())
         st.session_state.user_uuid = new_id
-        cookie_manager.set("vibecode_user_id", new_id, 
-                           expires_at=datetime.datetime.now() + datetime.timedelta(days=30))
+        cookie_manager.set("vibecode_user_id", new_id, expires_at=datetime.datetime.now() + datetime.timedelta(days=30))
         st.rerun()
 
-# --- 4. Fungsi Database & Dokumen ---
+# --- 4. Fungsi Helper ---
 def save_chat_to_db(chat_id, messages):
     try:
         data = {"user_id": st.session_state.user_uuid, "chat_id": chat_id, "messages": messages}
@@ -57,6 +54,12 @@ def load_user_chats():
         return {item['chat_id']: item['messages'] for item in res.data}
     except: return {}
 
+def generate_chat_title(prompt):
+    # Mengambil 5 kata pertama sebagai judul
+    words = prompt.split()[:5]
+    title = " ".join(words)
+    return (title[:30] + '...') if len(title) > 30 else title
+
 # --- 5. Inisialisasi State Chat ---
 db_history = load_user_chats()
 
@@ -68,7 +71,7 @@ if "current_chat_id" not in st.session_state:
 
 if "messages" not in st.session_state:
     st.session_state.messages = db_history.get(st.session_state.current_chat_id, [
-        {"role": "assistant", "content": "Judge here to judge you"}
+        {"role": "assistant", "content": "Wassup! Judge siap memberikan keputusan."}
     ])
 
 # --- 6. Sidebar ---
@@ -88,32 +91,36 @@ with st.sidebar:
             st.session_state.messages = db_history[cid]
             st.rerun()
 
-# --- 7. Main Chat Display (Tanpa Avatar) ---
+# --- 7. Main Chat Display ---
 chat_placeholder = st.container()
-
 with chat_placeholder:
     for msg in st.session_state.messages:
         content = msg["content"]
         if msg["role"] == "user":
-            # Filter tampilan dokumen di chat
             if "[Isi Dokumen:" in content:
                 content = content.split("\n\n[Isi Dokumen:")[0] + " *(dengan dokumen)*"
-            st.markdown(f"**YOU:** {content}")
+            st.markdown(f"#### :blue[YOU:] \n {content}")
         else:
-            st.markdown(f"**Judge:** {content}")
-        st.write("") # Memberi jarak antar pesan
+            st.markdown(f"#### :green[Judge:] \n {content}")
+        st.write("---")
 
 # Input Chat
 if prompt := st.chat_input("Input Here..."):
-    # Tampilkan input user secara instan
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.rerun() # Rerun agar pesan YOU muncul sebelum Judge mulai mengetik
+    # Logika Ganti Judul Otomatis jika masih default 'Chat X'
+    if st.session_state.current_chat_id.startswith("Chat "):
+        new_title = generate_chat_title(prompt)
+        # Hindari duplikasi ID
+        if new_title in db_history:
+            new_title = f"{new_title} ({len(db_history)})"
+        st.session_state.current_chat_id = new_title
 
-# Logika Respon Judge (Jika pesan terakhir dari User)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.rerun()
+
+# Logika Respon Judge
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     full_response = ""
-    # Header Judge untuk streaming
-    st.write("**Judge:**")
+    st.markdown("#### :green[Judge:]")
     res_box = st.empty()
     
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
@@ -132,7 +139,6 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                         token = json.loads(data_str)["choices"][0]["delta"].get("content", "")
                         full_response += token
                         
-                        # Bersihkan tag think secara real-time
                         clean_view = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
                         clean_view = re.sub(r'<think>.*', '', clean_view, flags=re.DOTALL)
                         res_box.markdown(clean_view + "▌")
@@ -141,10 +147,9 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
         final_clean = re.sub(r'<think>.*?</think>', '', full_response, flags=re.DOTALL)
         res_box.markdown(final_clean)
         
-        # Simpan ke state dan DB
         st.session_state.messages.append({"role": "assistant", "content": final_clean})
         save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
-        st.rerun() # Sinkronisasi tampilan akhir
+        st.rerun()
         
     except Exception as e:
         st.error(f"Error: {e}")
