@@ -68,7 +68,7 @@ if "current_chat_id" not in st.session_state:
 
 if "messages" not in st.session_state:
     st.session_state.messages = db_history.get(st.session_state.current_chat_id, [
-        {"role": "assistant", "content": "Wassup! Judge siap memberikan keputusan."}
+        {"role": "assistant", "content": "Judge here to judge you"}
     ])
 
 # --- 6. Sidebar ---
