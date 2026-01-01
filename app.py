@@ -66,7 +66,7 @@ def read_document(file):
 # --- 5. Sidebar Riwayat Chat ---
 with st.sidebar:
     st.title("VibeCode")
-    st.caption(f"ID Anda: {st.session_state.user_uuid[:8]}...") # Tampilan ID pendek
+    st.caption(f"User ID: {st.session_state.user_uuid[:8]}...") # Tampilan ID pendek
     
     db_history = load_user_chats()
     
