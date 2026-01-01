@@ -108,12 +108,11 @@ db_history = load_user_chats(user_id)
 with st.sidebar:
     st.title("The Blueprint")
     st.write(f"User: **{username}**")
-    st.divider()
-    
-    if st.button("+ New Blueprint", use_container_width=True):
+    if st.button("+ New Blueprint", use_container_width=False):
         st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
         st.session_state.messages = [{"role": "assistant", "content": "New architectural session started."}]
         st.rerun()
+    st.divider()
     
     st.write("### History")
     for cid in db_history.keys():
