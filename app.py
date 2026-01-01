@@ -134,21 +134,39 @@ if prompt := st.chat_input("Message VibeCode...", accept_file=True):
 
         try:
             resp = requests.post(API_URL, headers=HEADERS, json=payload, stream=True)
+            
+            # Cek jika request gagal (misal: Token salah atau Model sedang sibuk)
+            if resp.status_code != 200:
+                st.error(f"API Error ({resp.status_code}): {resp.text}")
+                st.stop()
+
             for line in resp.iter_lines():
                 if line:
                     line_text = line.decode('utf-8')
                     if line_text.startswith("data: "):
                         data_str = line_text[6:]
                         if data_str.strip() == "[DONE]": break
-                        token = json.loads(data_str)["choices"][0].get("delta", {}).get("content", "")
-                        full_response += token
-                        placeholder.markdown(full_response + "▌")
+                        
+                        try:
+                            data_json = json.loads(data_str)
+                            # TAMBAHKAN PENGECEKAN AMAN DI SINI
+                            if "choices" in data_json and len(data_json["choices"]) > 0:
+                                delta = data_json["choices"][0].get("delta", {})
+                                token = delta.get("content", "")
+                                if token:
+                                    full_response += token
+                                    placeholder.markdown(full_response + "▌")
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue # Lewati jika baris data tidak valid
             
-            placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
-            
-            # SIMPAN KE DATABASE
-            save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
+            # Jika respons berhasil didapat
+            if full_response:
+                placeholder.markdown(full_response)
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                # SIMPAN KE DATABASE
+                save_chat_to_db(st.session_state.current_chat_id, st.session_state.messages)
+            else:
+                st.warning("AI tidak memberikan jawaban. Coba kurangi 'Creativity' atau ganti Model.")
             
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Koneksi terputus: {e}")
