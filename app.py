@@ -8,7 +8,6 @@ from PyPDF2 import PdfReader
 from docx import Document
 from supabase import create_client, Client
 from dotenv import load_dotenv
-import extra_streamlit_components as stx  # Library untuk Cookie
 
 load_dotenv()
 
@@ -17,7 +16,7 @@ st.set_page_config(page_title="The Blueprint", layout="wide")
 
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
-# --- 2. INITIALIZE SUPABASE & COOKIE ---
+# --- 2. INITIALIZE SUPABASE ---
 @st.cache_resource
 def init_supabase():
     url = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
@@ -25,24 +24,19 @@ def init_supabase():
     return create_client(url, key)
 
 supabase = init_supabase()
-cookie_manager = stx.CookieManager()
 
-# --- 3. SESSION PERSISTENCE (FIXED WITH COOKIES) ---
-# Kita mencoba mengambil token dari cookie jika session_state kosong
+# --- 3. SESSION PERSISTENCE ---
 if "user_data" not in st.session_state:
-    # Ambil token dari storage browser
-    token = cookie_manager.get("sb-access-token")
-    if token:
-        try:
-            # Validasi token ke Supabase
-            res = supabase.auth.get_user(token)
-            if res and res.user:
-                st.session_state.user_data = res.user
-                st.session_state.username = res.user.user_metadata.get(
-                    "username", res.user.email.split('@')[0]
-                )
-        except:
-            pass
+    try:
+        # Mencoba mengambil sesi yang tersimpan di browser via Supabase Auth
+        res = supabase.auth.get_session()
+        if res and res.session:
+            st.session_state.user_data = res.session.user
+            st.session_state.username = res.session.user.user_metadata.get(
+                "username", res.session.user.email.split('@')[0]
+            )
+    except:
+        pass
 
 if "temp" not in st.session_state:
     st.session_state.temp = 0.4
@@ -83,11 +77,11 @@ def save_chat_to_db(user_id, chat_id, messages, username):
 if "user_data" not in st.session_state:
     st.title("The Blueprint")
     tab_login, tab_reg = st.tabs(["Login", "Register"])
-    
     with tab_login:
         with st.form("login_form"):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
+            # Tetap ada checkbox, meski logikanya bergantung pada provider Supabase
             stay_logged_in = st.checkbox("Stay Logged In", value=True)
             
             if st.form_submit_button("Login", use_container_width=True):
@@ -95,18 +89,9 @@ if "user_data" not in st.session_state:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                     st.session_state.user_data = res.user
                     st.session_state.username = res.user.user_metadata.get("username", email.split('@')[0])
-                    
-                    # LOGIKA PENTING: Simpan token ke cookie browser
-                    if stay_logged_in and res.session:
-                        cookie_manager.set(
-                            "sb-access-token", 
-                            res.session.access_token,
-                            max_age=604800 # Simpan selama 7 hari (dalam detik)
-                        )
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
-                    
     with tab_reg:
         with st.form("register_form"):
             u_name = st.text_input("Username")
@@ -120,7 +105,7 @@ if "user_data" not in st.session_state:
                     st.error(f"Failed: {e}")
     st.stop()
 
-# --- 6. SIDEBAR REORGANIZATION ---
+# --- 6. SIDEBAR ---
 user_id = st.session_state.user_data.id
 username = st.session_state.username
 db_history = load_user_chats(user_id)
@@ -144,7 +129,6 @@ st.markdown("""
 with st.sidebar:
     st.title("The Blueprint")
     st.write(f"User: **{username}**")
-    st.caption("● System Online")
     
     if st.button("+ New Blueprint", use_container_width=True, type="primary"):
         st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
@@ -152,7 +136,6 @@ with st.sidebar:
         st.rerun()
     
     st.divider()
-    
     st.subheader("Archive")
     history_container = st.container(height=350, border=False)
     with history_container:
@@ -169,10 +152,8 @@ with st.sidebar:
     st.divider()
     with st.expander("⚙️ System Control"):
         st.session_state.temp = st.slider("Creativity", 0.0, 1.0, float(st.session_state.get("temp", 0.4)), 0.1)
-        
         if st.button("Logout", use_container_width=True, type="primary"):
             supabase.auth.sign_out()
-            cookie_manager.delete("sb-access-token") # Hapus cookie saat logout
             st.session_state.clear()
             st.rerun()
 
@@ -180,12 +161,13 @@ with st.sidebar:
 st.caption(f"Project Session: {st.session_state.current_chat_id}")
 
 for msg in st.session_state.messages:
-    role_color = ":blue" if msg["role"] == "user" else ":green"
-    role_name = username if msg["role"] == "user" else "Architect"
-    content = msg["content"]
-    if "[Document Content:" in content:
-        content = content.split("\n\n[Document Content:")[0] + " (Files attached)"
-    st.markdown(f"**{role_color}[{role_name}]**: {content}")
+    if msg["role"] == "user":
+        content = msg["content"]
+        if "[Document Content:" in content:
+            content = content.split("\n\n[Document Content:")[0] + " (Files attached)"
+        st.markdown(f"**:blue[{username}]**: {content}")
+    else:
+        st.markdown(f"**:green[Architect]**: {msg['content']}")
 
 if prompt_data := st.chat_input("Input system requirements...", accept_file=True):
     user_text = prompt_data.text
@@ -230,4 +212,4 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
         save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
         st.rerun()
     except Exception as e:
-        st.error(f"Link lost: {e}")
+        st.error(f"Architect link lost: {e}")
