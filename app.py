@@ -8,6 +8,7 @@ from PyPDF2 import PdfReader
 from docx import Document
 from supabase import create_client, Client
 from dotenv import load_dotenv
+import extra_streamlit_components as stx  # Library untuk Cookie
 
 load_dotenv()
 
@@ -16,7 +17,7 @@ st.set_page_config(page_title="The Blueprint", layout="wide")
 
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
-# --- 2. INITIALIZE SUPABASE ---
+# --- 2. INITIALIZE SUPABASE & COOKIE ---
 @st.cache_resource
 def init_supabase():
     url = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
@@ -24,34 +25,28 @@ def init_supabase():
     return create_client(url, key)
 
 supabase = init_supabase()
+cookie_manager = stx.CookieManager()
 
-# --- 3. SESSION PERSISTENCE (OPTIMIZED) ---
+# --- 3. SESSION PERSISTENCE (FIXED WITH COOKIES) ---
+# Kita mencoba mengambil token dari cookie jika session_state kosong
 if "user_data" not in st.session_state:
-    try:
-        # Memberikan jeda sangat singkat agar library siap
-        # Mencoba mengambil sesi yang tersimpan di browser
-        session_response = supabase.auth.get_session()
-        
-        if session_response and session_response.session:
-            # Jika sesi ditemukan, kunci ke dalam session_state
-            st.session_state.user_data = session_response.session.user
-            st.session_state.username = session_response.session.user.user_metadata.get(
-                "username", session_response.session.user.email.split('@')[0]
-            )
-        else:
-            # Jika get_session gagal, coba ambil user langsung (fallback)
-            user_response = supabase.auth.get_user()
-            if user_response and user_response.user:
-                st.session_state.user_data = user_response.user
-                st.session_state.username = user_response.user.user_metadata.get(
-                    "username", user_response.user.email.split('@')[0]
+    # Ambil token dari storage browser
+    token = cookie_manager.get("sb-access-token")
+    if token:
+        try:
+            # Validasi token ke Supabase
+            res = supabase.auth.get_user(token)
+            if res and res.user:
+                st.session_state.user_data = res.user
+                st.session_state.username = res.user.user_metadata.get(
+                    "username", res.user.email.split('@')[0]
                 )
-    except Exception:
-        # Jika benar-benar tidak ada data, biarkan user ke halaman login
-        pass
+        except:
+            pass
 
 if "temp" not in st.session_state:
     st.session_state.temp = 0.4
+
 # --- 4. HELPERS ---
 def read_document(file):
     try:
@@ -93,9 +88,7 @@ if "user_data" not in st.session_state:
         with st.form("login_form"):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
-            
-            # FITUR BARU: Checkbox Stay Logged In
-            stay_logged_in = st.checkbox("Stay Logged In", value=True, help="Keep me logged in on this browser.")
+            stay_logged_in = st.checkbox("Stay Logged In", value=True)
             
             if st.form_submit_button("Login", use_container_width=True):
                 try:
@@ -103,9 +96,13 @@ if "user_data" not in st.session_state:
                     st.session_state.user_data = res.user
                     st.session_state.username = res.user.user_metadata.get("username", email.split('@')[0])
                     
-                    if stay_logged_in:
-                        st.toast("Session saved. Welcome back!", icon="🔐")
-                    
+                    # LOGIKA PENTING: Simpan token ke cookie browser
+                    if stay_logged_in and res.session:
+                        cookie_manager.set(
+                            "sb-access-token", 
+                            res.session.access_token,
+                            max_age=604800 # Simpan selama 7 hari (dalam detik)
+                        )
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
@@ -171,21 +168,11 @@ with st.sidebar:
 
     st.divider()
     with st.expander("⚙️ System Control"):
-        st.write("Model Settings")
         st.session_state.temp = st.slider("Creativity", 0.0, 1.0, float(st.session_state.get("temp", 0.4)), 0.1)
         
-        st.divider()
-        if st.button("Clear All Blueprints", use_container_width=True):
-            try:
-                supabase.table("chat_history").delete().eq("user_id", user_id).execute()
-                st.session_state.pop("messages", None)
-                st.session_state.pop("current_chat_id", None)
-                st.rerun()
-            except:
-                st.error("Error clearing data.")
-
         if st.button("Logout", use_container_width=True, type="primary"):
             supabase.auth.sign_out()
+            cookie_manager.delete("sb-access-token") # Hapus cookie saat logout
             st.session_state.clear()
             st.rerun()
 
@@ -193,14 +180,12 @@ with st.sidebar:
 st.caption(f"Project Session: {st.session_state.current_chat_id}")
 
 for msg in st.session_state.messages:
-    if msg["role"] == "user":
-        content = msg["content"]
-        if "[Document Content:" in content:
-            content = content.split("\n\n[Document Content:")[0] + " (Files attached)"
-        st.markdown(f"**:blue[{username}]**: {content}")
-    else:
-        st.markdown(f"**:green[Architect]**: {msg['content']}")
-    st.write("") 
+    role_color = ":blue" if msg["role"] == "user" else ":green"
+    role_name = username if msg["role"] == "user" else "Architect"
+    content = msg["content"]
+    if "[Document Content:" in content:
+        content = content.split("\n\n[Document Content:")[0] + " (Files attached)"
+    st.markdown(f"**{role_color}[{role_name}]**: {content}")
 
 if prompt_data := st.chat_input("Input system requirements...", accept_file=True):
     user_text = prompt_data.text
@@ -215,12 +200,6 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
     res_box = st.empty() 
     full_res = ""
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    assistant_header = f"**:green[Architect]**: "
-    
-    sys_prompt = [{
-        "role": "system", 
-        "content": f"You are VibeCode Architect. Senior developer. Address user as {username}. Use markdown."
-    }]
     
     try:
         resp = requests.post(
@@ -228,7 +207,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
             headers={"Authorization": f"Bearer {TOKEN}"},
             json={
                 "model": DEDICATED_MODEL, 
-                "messages": sys_prompt + st.session_state.messages, 
+                "messages": [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}."}] + st.session_state.messages, 
                 "temperature": st.session_state.temp, 
                 "stream": True
             },
@@ -241,17 +220,14 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                 if decoded.startswith("data: ") and "[DONE]" not in decoded:
                     try:
                         chunk = json.loads(decoded[6:])
-                        if chunk["choices"][0]["delta"].get("content"):
-                            token = chunk["choices"][0]["delta"]["content"]
-                            full_res += token
-                            res_box.markdown(f"{assistant_header}{full_res}▌")
-                    except:
-                        continue
+                        token = chunk["choices"][0]["delta"].get("content", "")
+                        full_res += token
+                        res_box.markdown(f"**:green[Architect]**: {full_res}▌")
+                    except: continue
         
-        res_box.markdown(f"{assistant_header}{full_res}")
+        res_box.markdown(f"**:green[Architect]**: {full_res}")
         st.session_state.messages.append({"role": "assistant", "content": full_res})
         save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
         st.rerun()
-        
     except Exception as e:
-        st.error(f"Architect link lost: {e}")
+        st.error(f"Link lost: {e}")
