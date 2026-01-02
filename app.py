@@ -54,9 +54,11 @@ if "user" not in st.session_state:
                 st.session_state.temp = 0.4
                 st.rerun()
         except:
-            cookies.delete("access_token")
-            cookies.delete("refresh_token")
-            cookies.save()
+            # Ganti cookies.delete(...) dengan ini:
+        for key in ["access_token", "refresh_token"]:
+            if key in cookies:
+                del cookies[key]
+                cookies.save()
 
 # =====================
 # HELPERS
