@@ -16,22 +16,7 @@ st.set_page_config(page_title="The Blueprint", layout="wide")
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # =====================
-# COOKIES (Lazy Init)
-# =====================
-@st.cache_resource
-def get_cookie_manager():
-    return EncryptedCookieManager(
-        prefix="blueprint_",
-        password=os.getenv("COOKIE_SECRET", "dev-secret")
-    )
-
-cookies = get_cookie_manager()
-
-if not cookies.ready():
-    st.stop()
-
-# =====================
-# SUPABASE (Cached)
+# SUPABASE (Cached - This is safe)
 # =====================
 @st.cache_resource
 def get_supabase():
@@ -43,39 +28,67 @@ def get_supabase():
 supabase = get_supabase()
 
 # =====================
+# COOKIES (NOT cached - widgets can't be cached)
+# =====================
+cookies = EncryptedCookieManager(
+    prefix="blueprint_",
+    password=os.getenv("COOKIE_SECRET", "dev-secret")
+)
+
+if not cookies.ready():
+    st.stop()
+
+# =====================
 # SESSION REHYDRATION (Optimized)
 # =====================
 if "user" not in st.session_state and "access_token" in cookies:
     try:
-        # Set session tanpa re-fetch user jika sudah ada di cookies
-        if "cached_user" in cookies:
-            user_data = json.loads(cookies["cached_user"])
-            st.session_state.user = type('User', (), user_data)()
-            st.session_state.username = user_data.get("username", user_data.get("email", "").split("@")[0])
+        # Cek apakah ada cached user data di cookies
+        if "user_email" in cookies:
+            # Quick session restore tanpa API call
+            st.session_state.user_id = cookies.get("user_id")
+            st.session_state.user_email = cookies.get("user_email")
+            st.session_state.username = cookies.get("username")
             st.session_state.temp = 0.4
+            st.session_state.authenticated = True
+            
+            # Create dummy user object untuk kompatibilitas
+            class DummyUser:
+                def __init__(self, uid, email):
+                    self.id = uid
+                    self.email = email
+            
+            st.session_state.user = DummyUser(
+                cookies.get("user_id"),
+                cookies.get("user_email")
+            )
         else:
+            # Fallback: verify dengan Supabase
             supabase.auth.set_session(
                 cookies["access_token"],
                 cookies["refresh_token"]
             )
             user = supabase.auth.get_user().user
+            
             st.session_state.user = user
+            st.session_state.user_id = user.id
+            st.session_state.user_email = user.email
             st.session_state.username = (
-                user.user_metadata.get("username")
-                or user.email.split("@")[0]
+                user.user_metadata.get("username") or user.email.split("@")[0]
             )
             st.session_state.temp = 0.4
+            st.session_state.authenticated = True
             
-            # Cache user data
-            cookies["cached_user"] = json.dumps({
-                "id": user.id,
-                "email": user.email,
-                "username": st.session_state.username
-            })
+            # Cache untuk sesi berikutnya
+            cookies["user_id"] = user.id
+            cookies["user_email"] = user.email
+            cookies["username"] = st.session_state.username
             cookies.save()
+            
     except Exception as e:
+        # Session invalid, clear everything
         cookies.clear()
-        st.error(f"Session expired. Please login again.")
+        st.session_state.authenticated = False
 
 # =====================
 # HELPERS
@@ -90,21 +103,24 @@ def read_document(file):
     except:
         return ""
 
-# Lazy load chat history - hanya load saat dibutuhkan
-@st.cache_data(ttl=60)  # Cache selama 60 detik
+# Cache dengan TTL untuk menghindari query database terlalu sering
+@st.cache_data(ttl=120, show_spinner=False)
 def load_user_chats(_uid):
+    """Load chat history dengan caching 2 menit"""
     try:
         res = supabase.table("chat_history") \
-            .select("*") \
+            .select("chat_id,messages,last_updated") \
             .eq("user_id", _uid) \
             .order("last_updated", desc=True) \
-            .limit(20) \
-            .execute()  # Batasi hanya 20 chat terakhir
+            .limit(15) \
+            .execute()
         return {r["chat_id"]: r["messages"] for r in res.data}
-    except:
+    except Exception as e:
+        st.error(f"Failed to load chats: {str(e)}")
         return {}
 
 def save_chat(uid, cid, msgs, uname):
+    """Save chat dengan error handling"""
     try:
         supabase.table("chat_history").upsert(
             {
@@ -119,68 +135,85 @@ def save_chat(uid, cid, msgs, uname):
         # Clear cache setelah save
         load_user_chats.clear()
     except Exception as e:
-        st.error(f"Failed to save chat: {str(e)}")
+        st.toast(f"⚠️ Save failed: {str(e)}", icon="⚠️")
 
 # =====================
 # AUTH GATE
 # =====================
-if "user" not in st.session_state:
+if "authenticated" not in st.session_state or not st.session_state.authenticated:
 
-    st.title("The Blueprint")
+    st.title("🔷 The Blueprint")
+    st.caption("Your AI Architecture Assistant")
 
-    tab_login, tab_reg = st.tabs(["Login", "Register"])
+    tab_login, tab_reg = st.tabs(["🔑 Login", "📝 Register"])
 
     with tab_login:
-        with st.form("login"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
+        with st.form("login", clear_on_submit=True):
+            email = st.text_input("Email", placeholder="your@email.com")
+            password = st.text_input("Password", type="password", placeholder="••••••••")
 
-            if st.form_submit_button("Login", use_container_width=True):
-                with st.spinner("Logging in..."):
-                    try:
-                        res = supabase.auth.sign_in_with_password({
-                            "email": email,
-                            "password": password
-                        })
+            if st.form_submit_button("Login", use_container_width=True, type="primary"):
+                if not email or not password:
+                    st.error("Please fill all fields")
+                else:
+                    with st.spinner("🔐 Authenticating..."):
+                        try:
+                            res = supabase.auth.sign_in_with_password({
+                                "email": email,
+                                "password": password
+                            })
 
-                        # Save tokens
-                        cookies["access_token"] = res.session.access_token
-                        cookies["refresh_token"] = res.session.refresh_token
-                        
-                        # Cache user data untuk login cepat
-                        username = res.user.user_metadata.get("username") or email.split("@")[0]
-                        cookies["cached_user"] = json.dumps({
-                            "id": res.user.id,
-                            "email": res.user.email,
-                            "username": username
-                        })
-                        cookies.save()
+                            # Save authentication
+                            cookies["access_token"] = res.session.access_token
+                            cookies["refresh_token"] = res.session.refresh_token
+                            
+                            username = res.user.user_metadata.get("username") or email.split("@")[0]
+                            
+                            # Cache user data
+                            cookies["user_id"] = res.user.id
+                            cookies["user_email"] = res.user.email
+                            cookies["username"] = username
+                            cookies.save()
 
-                        st.session_state.user = res.user
-                        st.session_state.username = username
-                        st.session_state.temp = 0.4
-                        st.success("Login successful!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Login failed: {str(e)}")
+                            # Session state
+                            st.session_state.user = res.user
+                            st.session_state.user_id = res.user.id
+                            st.session_state.user_email = res.user.email
+                            st.session_state.username = username
+                            st.session_state.temp = 0.4
+                            st.session_state.authenticated = True
+                            
+                            st.success("✅ Login successful!")
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"❌ Login failed: {str(e)}")
 
     with tab_reg:
-        with st.form("register"):
-            username = st.text_input("Username")
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
+        with st.form("register", clear_on_submit=True):
+            username = st.text_input("Username", placeholder="architect")
+            email = st.text_input("Email", placeholder="your@email.com")
+            password = st.text_input("Password", type="password", placeholder="••••••••")
+            password2 = st.text_input("Confirm Password", type="password", placeholder="••••••••")
 
-            if st.form_submit_button("Register", use_container_width=True):
-                with st.spinner("Registering..."):
-                    try:
-                        supabase.auth.sign_up({
-                            "email": email,
-                            "password": password,
-                            "options": {"data": {"username": username}}
-                        })
-                        st.success("Registered! Please check your email and then login.")
-                    except Exception as e:
-                        st.error(f"Registration failed: {str(e)}")
+            if st.form_submit_button("Register", use_container_width=True, type="primary"):
+                if not username or not email or not password:
+                    st.error("Please fill all fields")
+                elif password != password2:
+                    st.error("Passwords don't match")
+                elif len(password) < 6:
+                    st.error("Password must be at least 6 characters")
+                else:
+                    with st.spinner("📝 Creating account..."):
+                        try:
+                            supabase.auth.sign_up({
+                                "email": email,
+                                "password": password,
+                                "options": {"data": {"username": username}}
+                            })
+                            st.success("✅ Registration successful! Please check your email, then login.")
+                        except Exception as e:
+                            st.error(f"❌ Registration failed: {str(e)}")
 
     st.stop()
 
@@ -188,19 +221,23 @@ if "user" not in st.session_state:
 # USER CONTEXT
 # =====================
 user = st.session_state.user
-uid = user.id if hasattr(user, 'id') else user.__dict__.get('id')
+uid = st.session_state.user_id
 username = st.session_state.username
 
 # =====================
 # CHAT STATE (Lazy Load)
 # =====================
-# Hanya load chat history saat pertama kali atau saat dibutuhkan
-if "db_history_loaded" not in st.session_state:
-    db_history = load_user_chats(uid)
-    st.session_state.db_history_loaded = True
+# Load chat history hanya sekali per session
+if "chats_loaded" not in st.session_state:
+    with st.spinner("Loading blueprints..."):
+        st.session_state.db_history = load_user_chats(uid)
+        st.session_state.chats_loaded = True
 else:
-    db_history = load_user_chats(uid)
+    st.session_state.db_history = load_user_chats(uid)
 
+db_history = st.session_state.db_history
+
+# Initialize current chat
 if "current_chat_id" not in st.session_state:
     if db_history:
         cid = next(iter(db_history))
@@ -209,37 +246,53 @@ if "current_chat_id" not in st.session_state:
     else:
         st.session_state.current_chat_id = "Main Blueprint"
         st.session_state.messages = [
-            {"role": "assistant", "content": "Architect ready. System online."}
+            {"role": "assistant", "content": "⚡ Architect ready. System online."}
         ]
 
 # =====================
 # SIDEBAR
 # =====================
 with st.sidebar:
-    st.title("The Blueprint")
-    st.write(f"User: **{username}**")
+    st.title("🔷 The Blueprint")
+    st.caption(f"👤 **{username}**")
 
-    if st.button("+ New Blueprint", use_container_width=True):
+    if st.button("➕ New Blueprint", use_container_width=True):
         st.session_state.current_chat_id = f"Blueprint {len(db_history)+1}"
         st.session_state.messages = [
-            {"role": "assistant", "content": "Architect ready. System online."}
+            {"role": "assistant", "content": "⚡ Architect ready. System online."}
         ]
         st.rerun()
 
     st.divider()
     
-    # Tampilkan hanya 10 chat terakhir di sidebar untuk performa
-    with st.container():
+    # Show recent chats
+    if db_history:
+        st.caption("📂 Recent Blueprints")
         for i, cid in enumerate(list(db_history.keys())[:10]):
-            if st.button(cid, key=cid, use_container_width=True):
+            is_current = cid == st.session_state.current_chat_id
+            if st.button(
+                f"{'📍' if is_current else '📄'} {cid}", 
+                key=f"chat_{i}",
+                use_container_width=True,
+                disabled=is_current
+            ):
                 st.session_state.current_chat_id = cid
                 st.session_state.messages = db_history[cid]
                 st.rerun()
+    else:
+        st.info("No blueprints yet. Start creating!")
 
     st.divider()
-    st.session_state.temp = st.slider("Creativity", 0.0, 1.0, st.session_state.temp, 0.1)
+    st.session_state.temp = st.slider(
+        "🎨 Creativity", 
+        0.0, 1.0, 
+        st.session_state.temp, 
+        0.1,
+        help="Higher = more creative, Lower = more focused"
+    )
 
-    if st.button("Logout", type="primary", use_container_width=True):
+    st.divider()
+    if st.button("🚪 Logout", type="primary", use_container_width=True):
         supabase.auth.sign_out()
         cookies.clear()
         st.session_state.clear()
@@ -247,56 +300,68 @@ with st.sidebar:
         st.rerun()
 
 # =====================
-# CHAT UI
+# MAIN CHAT UI
 # =====================
+st.title(f"💬 {st.session_state.current_chat_id}")
+
+# Display messages
 for msg in st.session_state.messages:
-    name = "Architect" if msg["role"] == "assistant" else username
-    st.markdown(f"**{name}:** {msg['content']}")
+    role = msg["role"]
+    with st.chat_message(role, avatar="⚡" if role == "assistant" else "👤"):
+        st.markdown(msg["content"])
 
 # =====================
 # INPUT
 # =====================
-if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
-    content = prompt.text + "".join(
-        f"\n\n[Document]\n{read_document(f)}" for f in prompt.files
-    )
-    st.session_state.messages.append({"role": "user", "content": content})
-    st.rerun()
+if prompt := st.chat_input("Describe your blueprint...", key="chat_input"):
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Display user message immediately
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(prompt)
+    
+    # Generate AI response
+    with st.chat_message("assistant", avatar="⚡"):
+        message_placeholder = st.empty()
+        full_response = ""
+        
+        try:
+            TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+            
+            r = requests.post(
+                "https://router.huggingface.co/v1/chat/completions",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+                json={
+                    "model": DEDICATED_MODEL,
+                    "messages": [
+                        {"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}
+                    ] + st.session_state.messages,
+                    "temperature": st.session_state.temp,
+                    "stream": True,
+                    "max_tokens": 2000
+                },
+                stream=True,
+                timeout=60
+            )
 
-# =====================
-# AI RESPONSE
-# =====================
-if st.session_state.messages[-1]["role"] == "user":
+            for line in r.iter_lines():
+                if line:
+                    data = line.decode()
+                    if data.startswith("data: ") and "[DONE]" not in data:
+                        try:
+                            token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
+                            full_response += token
+                            message_placeholder.markdown(full_response + "▌")
+                        except:
+                            continue
 
-    TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    box, full = st.empty(), ""
-
-    try:
-        r = requests.post(
-            "https://router.huggingface.co/v1/chat/completions",
-            headers={"Authorization": f"Bearer {TOKEN}"},
-            json={
-                "model": DEDICATED_MODEL,
-                "messages": [{"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}]
-                            + st.session_state.messages,
-                "temperature": st.session_state.temp,
-                "stream": True
-            },
-            stream=True,
-            timeout=30
-        )
-
-        for line in r.iter_lines():
-            if line:
-                data = line.decode()
-                if data.startswith("data: ") and "[DONE]" not in data:
-                    token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
-                    full += token
-                    box.markdown(f"**:green[Architect]:** {full}▌")
-
-        st.session_state.messages.append({"role": "assistant", "content": full})
-        save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
-        st.rerun()
-    except Exception as e:
-        st.error(f"Error generating response: {str(e)}")
-        st.session_state.messages.pop()  # Remove user message jika gagal
+            message_placeholder.markdown(full_response)
+            
+            # Save to history
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
+            
+        except Exception as e:
+            st.error(f"⚠️ Error: {str(e)}")
+            st.session_state.messages.pop()  # Remove failed user message
