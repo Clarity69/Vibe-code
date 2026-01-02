@@ -54,11 +54,11 @@ if "user" not in st.session_state:
                 st.session_state.temp = 0.4
                 st.rerun()
         except:
-            # Ganti cookies.delete(...) dengan ini:
-        for key in ["access_token", "refresh_token"]:
-            if key in cookies:
-                del cookies[key]
-                cookies.save()
+            # Perbaikan Indentasi & Metode Hapus Aman
+            for key in ["access_token", "refresh_token"]:
+                if key in cookies:
+                    del cookies[key]
+            cookies.save()
 
 # =====================
 # HELPERS
@@ -166,23 +166,23 @@ with st.sidebar:
     
     if st.button("Logout", type="secondary", use_container_width=True):
         supabase.auth.sign_out()
-        cookies.delete("access_token")
-        cookies.delete("refresh_token")
+        # Perbaikan Metode Hapus Aman untuk Logout
+        for key in ["access_token", "refresh_token"]:
+            if key in cookies:
+                del cookies[key]
         cookies.save()
         st.session_state.clear()
         st.rerun()
 
 # =====================
-# CHAT UI (Custom Style: No Avatars, Colored Names)
+# CHAT UI
 # =====================
 st.caption(f"Active Session: {st.session_state.current_chat_id}")
 
 for msg in st.session_state.messages:
     if msg["role"] == "assistant":
-        # Architect: Green (#2ecc71)
         st.markdown(f"**<span style='color:#2ecc71'>Architect</span>**: {msg['content']}", unsafe_allow_html=True)
     else:
-        # User: Blue (#3498db)
         st.markdown(f"**<span style='color:#3498db'>{username}</span>**: {msg['content']}", unsafe_allow_html=True)
     st.write("") 
 
@@ -190,28 +190,22 @@ for msg in st.session_state.messages:
 # INPUT & AI
 # =====================
 if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
-    # 1. Olah file dan teks
     file_content = ""
     for f in prompt.files:
         file_content += f"\n\n[Document: {f.name}]\n{read_document(f)}"
     
     full_prompt = prompt.text + file_content
-    
-    # 2. Tambahkan ke session state
     st.session_state.messages.append({"role": "user", "content": full_prompt})
     
-    # 3. Rename chat jika perlu
     if st.session_state.current_chat_id.startswith("Blueprint"):
         st.session_state.current_chat_id = prompt.text[:25] + "..." if len(prompt.text) > 25 else prompt.text
 
-    # 4. TAMPILKAN PROMPT USER SEGERA (PENTING!)
-    # Ini memastikan pesan muncul di layar sebelum proses AI dimulai
+    # Tampilkan prompt user segera agar tidak terlihat "langsung respon"
     st.markdown(f"**<span style='color:#3498db'>{username}</span>**: {prompt.text}", unsafe_allow_html=True)
     st.write("") 
 
-    # 5. Mulai AI Response
+    # AI Response
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    
     st.markdown(f"**<span style='color:#2ecc71'>Architect</span>**:", unsafe_allow_html=True)
     response_placeholder = st.empty()
     full_response = ""
@@ -238,12 +232,8 @@ if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
                     response_placeholder.markdown(full_response + "▌")
         
         response_placeholder.markdown(full_response)
-        
-        # Simpan jawaban AI dan simpan ke DB
         st.session_state.messages.append({"role": "assistant", "content": full_response})
         save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
-        
-        # Terakhir baru rerun untuk merapikan semua UI
         st.rerun()
         
     except Exception as e:
