@@ -26,20 +26,20 @@ def init_supabase():
 supabase = init_supabase()
 
 # --- 3. SESSION PERSISTENCE ---
-if "temp" not in st.session_state:
-    st.session_state.temp = 0.4
-
 if "user_data" not in st.session_state:
     try:
-        # Mengambil sesi aktif dari browser jika ada
-        res = supabase.auth.get_session()
-        if res and res.session:
-            st.session_state.user_data = res.session.user
-            st.session_state.username = res.session.user.user_metadata.get(
-                "username", res.session.user.email.split('@')[0]
+        # Mengambil sesi dari browser storage (jika user memilih Stay Logged In sebelumnya)
+        response = supabase.auth.get_session()
+        if response and response.session:
+            st.session_state.user_data = response.session.user
+            st.session_state.username = response.session.user.user_metadata.get(
+                "username", response.session.user.email.split('@')[0]
             )
     except:
         pass
+
+if "temp" not in st.session_state:
+    st.session_state.temp = 0.4
 
 # --- 4. HELPERS ---
 def read_document(file):
@@ -77,18 +77,28 @@ def save_chat_to_db(user_id, chat_id, messages, username):
 if "user_data" not in st.session_state:
     st.title("The Blueprint")
     tab_login, tab_reg = st.tabs(["Login", "Register"])
+    
     with tab_login:
         with st.form("login_form"):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
+            
+            # FITUR BARU: Checkbox Stay Logged In
+            stay_logged_in = st.checkbox("Stay Logged In", value=True, help="Keep me logged in on this browser.")
+            
             if st.form_submit_button("Login", use_container_width=True):
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                     st.session_state.user_data = res.user
                     st.session_state.username = res.user.user_metadata.get("username", email.split('@')[0])
+                    
+                    if stay_logged_in:
+                        st.toast("Session saved. Welcome back!", icon="🔐")
+                    
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
+                    
     with tab_reg:
         with st.form("register_form"):
             u_name = st.text_input("Username")
@@ -189,7 +199,7 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
         st.session_state.current_chat_id = (user_text[:30] + '...') if len(user_text) > 30 else user_text
     st.rerun()
 
-# --- 8. AI RESPONSE (Aktif dan Diperbaiki) ---
+# --- 8. AI RESPONSE ---
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     res_box = st.empty() 
     full_res = ""
