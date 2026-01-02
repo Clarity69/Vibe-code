@@ -6,3 +6,4 @@ python-docx
 supabase
 bcrypt
 extra-streamlit-components
+streamlit-cookies-manager

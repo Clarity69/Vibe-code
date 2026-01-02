@@ -1,97 +1,99 @@
 import streamlit as st
-import requests
-import json
-import os
-import datetime
+import requests, json, os, datetime
 from PyPDF2 import PdfReader
 from docx import Document
 from supabase import create_client
 from dotenv import load_dotenv
+from streamlit_cookies_manager import EncryptedCookieManager
 
 # =====================
-# ENV & CONFIG
+# CONFIG
 # =====================
 load_dotenv()
 
-st.set_page_config(
-    page_title="The Blueprint",
-    layout="wide"
-)
+st.set_page_config(page_title="The Blueprint", layout="wide")
 
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # =====================
-# SUPABASE (NO CACHE!)
+# COOKIES
+# =====================
+cookies = EncryptedCookieManager(
+    prefix="blueprint_",
+    password=os.getenv("COOKIE_SECRET", "dev-secret")
+)
+
+if not cookies.ready():
+    st.stop()
+
+# =====================
+# SUPABASE
 # =====================
 def get_supabase():
-    url = st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL")
-    key = st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
-    return create_client(url, key)
+    return create_client(
+        st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL"),
+        st.secrets.get("SUPABASE_KEY") or os.getenv("SUPABASE_KEY")
+    )
 
 supabase = get_supabase()
 
 # =====================
 # SESSION REHYDRATION
 # =====================
-if "user" not in st.session_state:
+if "user" not in st.session_state and "access_token" in cookies:
     try:
-        session = supabase.auth.get_session()
-        if session and session.user:
-            st.session_state.user = session.user
-            st.session_state.username = (
-                session.user.user_metadata.get("username")
-                or session.user.email.split("@")[0]
-            )
-            if "temp" not in st.session_state:
-                st.session_state.temp = 0.4
+        supabase.auth.set_session(
+            cookies["access_token"],
+            cookies["refresh_token"]
+        )
+        user = supabase.auth.get_user().user
+        st.session_state.user = user
+        st.session_state.username = (
+            user.user_metadata.get("username")
+            or user.email.split("@")[0]
+        )
+        st.session_state.temp = 0.4
     except:
-        pass
-
+        cookies.clear()
 
 # =====================
 # HELPERS
 # =====================
 def read_document(file):
     try:
-        name = file.name.lower()
-        if name.endswith(".pdf"):
+        if file.name.endswith(".pdf"):
             return "".join(p.extract_text() or "" for p in PdfReader(file).pages)
-        if name.endswith(".docx"):
+        if file.name.endswith(".docx"):
             return "\n".join(p.text for p in Document(file).paragraphs)
         return file.read().decode("utf-8")
-    except Exception as e:
-        return f"\n[Error reading {file.name}: {e}]\n"
+    except:
+        return ""
 
-def load_user_chats(user_id):
+def load_user_chats(uid):
     try:
-        res = (
-            supabase.table("chat_history")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("last_updated", desc=True)
+        res = supabase.table("chat_history") \
+            .select("*") \
+            .eq("user_id", uid) \
+            .order("last_updated", desc=True) \
             .execute()
-        )
-        return {row["chat_id"]: row["messages"] for row in res.data}
+        return {r["chat_id"]: r["messages"] for r in res.data}
     except:
         return {}
 
-def save_chat(user_id, chat_id, messages, username):
-    try:
-        supabase.table("chat_history").upsert(
-            {
-                "user_id": user_id,
-                "chat_id": chat_id,
-                "messages": messages,
-                "username": username,
-                "last_updated": datetime.datetime.utcnow().isoformat()
-            },
-            on_conflict="user_id,chat_id"
-        ).execute()
-    except:
-        pass
+def save_chat(uid, cid, msgs, uname):
+    supabase.table("chat_history").upsert(
+        {
+            "user_id": uid,
+            "chat_id": cid,
+            "messages": msgs,
+            "username": uname,
+            "last_updated": datetime.datetime.utcnow().isoformat()
+        },
+        on_conflict="user_id,chat_id"
+    ).execute()
 
 # =====================
-# AUTH GATE (HARD)
+# AUTH GATE
 # =====================
 if "user" not in st.session_state:
 
@@ -105,22 +107,22 @@ if "user" not in st.session_state:
             password = st.text_input("Password", type="password")
 
             if st.form_submit_button("Login", use_container_width=True):
-                try:
-                    res = supabase.auth.sign_in_with_password({
-                        "email": email,
-                        "password": password
-                    })
+                res = supabase.auth.sign_in_with_password({
+                    "email": email,
+                    "password": password
+                })
 
-                    st.session_state.user = res.user
-                    st.session_state.username = (
-                        res.user.user_metadata.get("username")
-                        or email.split("@")[0]
-                    )
-                    st.session_state.temp = 0.4
-                    st.rerun()
+                cookies["access_token"] = res.session.access_token
+                cookies["refresh_token"] = res.session.refresh_token
+                cookies.save()
 
-                except Exception as e:
-                    st.error(f"Login failed: {e}")
+                st.session_state.user = res.user
+                st.session_state.username = (
+                    res.user.user_metadata.get("username")
+                    or email.split("@")[0]
+                )
+                st.session_state.temp = 0.4
+                st.rerun()
 
     with tab_reg:
         with st.form("register"):
@@ -129,15 +131,12 @@ if "user" not in st.session_state:
             password = st.text_input("Password", type="password")
 
             if st.form_submit_button("Register", use_container_width=True):
-                try:
-                    supabase.auth.sign_up({
-                        "email": email,
-                        "password": password,
-                        "options": {"data": {"username": username}}
-                    })
-                    st.success("Registered. Please login.")
-                except Exception as e:
-                    st.error(f"Register failed: {e}")
+                supabase.auth.sign_up({
+                    "email": email,
+                    "password": password,
+                    "options": {"data": {"username": username}}
+                })
+                st.success("Registered. Please login.")
 
     st.stop()
 
@@ -145,13 +144,13 @@ if "user" not in st.session_state:
 # USER CONTEXT
 # =====================
 user = st.session_state.user
-user_id = user.id
+uid = user.id
 username = st.session_state.username
 
 # =====================
-# LOAD CHAT STATE
+# CHAT STATE
 # =====================
-db_history = load_user_chats(user_id)
+db_history = load_user_chats(uid)
 
 if "current_chat_id" not in st.session_state:
     if db_history:
@@ -170,63 +169,45 @@ if "current_chat_id" not in st.session_state:
 with st.sidebar:
     st.title("The Blueprint")
     st.write(f"User: **{username}**")
-    st.caption("● System Online")
 
     if st.button("+ New Blueprint", use_container_width=True):
-        st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
+        st.session_state.current_chat_id = f"Blueprint {len(db_history)+1}"
         st.session_state.messages = [
             {"role": "assistant", "content": "Architect ready. System online."}
         ]
         st.rerun()
 
     st.divider()
-    st.subheader("Archive")
-
     for cid in db_history:
-        active = cid == st.session_state.current_chat_id
-        label = f"» {cid}" if active else cid
-        if st.button(label, key=f"chat_{cid}", use_container_width=True):
+        if st.button(cid, key=cid, use_container_width=True):
             st.session_state.current_chat_id = cid
             st.session_state.messages = db_history[cid]
             st.rerun()
 
     st.divider()
-    st.session_state.temp = st.slider(
-        "Creativity",
-        0.0, 1.0,
-        st.session_state.temp,
-        0.1
-    )
+    st.session_state.temp = st.slider("Creativity", 0.0, 1.0, st.session_state.temp, 0.1)
 
     if st.button("Logout", type="primary", use_container_width=True):
-        supabase.auth.sign_out()   # <- WAJIB
+        supabase.auth.sign_out()
+        cookies.clear()
         st.session_state.clear()
         st.rerun()
-
 
 # =====================
 # CHAT UI
 # =====================
-st.caption(f"Session: {st.session_state.current_chat_id}")
-
 for msg in st.session_state.messages:
-    role = "Architect" if msg["role"] == "assistant" else username
-    color = "green" if msg["role"] == "assistant" else "blue"
-    st.markdown(f"**:{color}[{role}]**: {msg['content']}")
+    name = "Architect" if msg["role"] == "assistant" else username
+    st.markdown(f"**{name}:** {msg['content']}")
 
 # =====================
 # INPUT
 # =====================
 if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
-    text = prompt.text
-    files = "".join(
-        f"\n\n[Document {f.name}]\n{read_document(f)}"
-        for f in prompt.files
+    content = prompt.text + "".join(
+        f"\n\n[Document]\n{read_document(f)}" for f in prompt.files
     )
-    st.session_state.messages.append({
-        "role": "user",
-        "content": text + files
-    })
+    st.session_state.messages.append({"role": "user", "content": content})
     st.rerun()
 
 # =====================
@@ -235,37 +216,29 @@ if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
 if st.session_state.messages[-1]["role"] == "user":
 
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    box = st.empty()
-    full = ""
+    box, full = st.empty(), ""
 
-    try:
-        r = requests.post(
-            "https://router.huggingface.co/v1/chat/completions",
-            headers={"Authorization": f"Bearer {TOKEN}"},
-            json={
-                "model": DEDICATED_MODEL,
-                "messages": [
-                    {"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}
-                ] + st.session_state.messages,
-                "temperature": st.session_state.temp,
-                "stream": True
-            },
-            stream=True
-        )
+    r = requests.post(
+        "https://router.huggingface.co/v1/chat/completions",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        json={
+            "model": DEDICATED_MODEL,
+            "messages": [{"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}]
+                        + st.session_state.messages,
+            "temperature": st.session_state.temp,
+            "stream": True
+        },
+        stream=True
+    )
 
-        for line in r.iter_lines():
-            if not line:
-                continue
+    for line in r.iter_lines():
+        if line:
             data = line.decode()
             if data.startswith("data: ") and "[DONE]" not in data:
                 token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
                 full += token
-                box.markdown(f"**:green[Architect]**: {full}▌")
+                box.markdown(f"**Architect:** {full}▌")
 
-        box.markdown(f"**:green[Architect]**: {full}")
-        st.session_state.messages.append({"role": "assistant", "content": full})
-        save_chat(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
-        st.rerun()
-
-    except Exception as e:
-        st.error(f"Model error: {e}")
+    st.session_state.messages.append({"role": "assistant", "content": full})
+    save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
+    st.rerun()
