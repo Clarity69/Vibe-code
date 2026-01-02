@@ -6,21 +6,18 @@ from supabase import create_client
 from dotenv import load_dotenv
 from streamlit_cookies_manager import EncryptedCookieManager
 
-# ======================================================
-# ENV & CONFIG
-# ======================================================
+# =====================
+# CONFIG
+# =====================
 load_dotenv()
 
-st.set_page_config(
-    page_title="The Blueprint",
-    layout="wide"
-)
+st.set_page_config(page_title="The Blueprint", layout="wide")
 
-MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
+DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
-# ======================================================
-# COOKIES (LOGIN PERSISTENCE)
-# ======================================================
+# =====================
+# COOKIES
+# =====================
 cookies = EncryptedCookieManager(
     prefix="blueprint_",
     password=os.getenv("COOKIE_SECRET", "dev-secret")
@@ -29,9 +26,9 @@ cookies = EncryptedCookieManager(
 if not cookies.ready():
     st.stop()
 
-# ======================================================
-# SUPABASE CLIENT
-# ======================================================
+# =====================
+# SUPABASE
+# =====================
 def get_supabase():
     return create_client(
         st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL"),
@@ -40,9 +37,9 @@ def get_supabase():
 
 supabase = get_supabase()
 
-# ======================================================
-# SESSION REHYDRATION (AUTO LOGIN)
-# ======================================================
+# =====================
+# SESSION REHYDRATION
+# =====================
 if "user" not in st.session_state and "access_token" in cookies:
     try:
         supabase.auth.set_session(
@@ -50,20 +47,18 @@ if "user" not in st.session_state and "access_token" in cookies:
             cookies["refresh_token"]
         )
         user = supabase.auth.get_user().user
-
         st.session_state.user = user
         st.session_state.username = (
             user.user_metadata.get("username")
             or user.email.split("@")[0]
         )
         st.session_state.temp = 0.4
-
     except:
         cookies.clear()
 
-# ======================================================
+# =====================
 # HELPERS
-# ======================================================
+# =====================
 def read_document(file):
     try:
         if file.name.endswith(".pdf"):
@@ -76,13 +71,11 @@ def read_document(file):
 
 def load_user_chats(uid):
     try:
-        res = (
-            supabase.table("chat_history")
-            .select("*")
-            .eq("user_id", uid)
-            .order("last_updated", desc=True)
+        res = supabase.table("chat_history") \
+            .select("*") \
+            .eq("user_id", uid) \
+            .order("last_updated", desc=True) \
             .execute()
-        )
         return {r["chat_id"]: r["messages"] for r in res.data}
     except:
         return {}
@@ -99,9 +92,9 @@ def save_chat(uid, cid, msgs, uname):
         on_conflict="user_id,chat_id"
     ).execute()
 
-# ======================================================
+# =====================
 # AUTH GATE
-# ======================================================
+# =====================
 if "user" not in st.session_state:
 
     st.title("The Blueprint")
@@ -147,16 +140,16 @@ if "user" not in st.session_state:
 
     st.stop()
 
-# ======================================================
+# =====================
 # USER CONTEXT
-# ======================================================
+# =====================
 user = st.session_state.user
 uid = user.id
 username = st.session_state.username
 
-# ======================================================
+# =====================
 # CHAT STATE
-# ======================================================
+# =====================
 db_history = load_user_chats(uid)
 
 if "current_chat_id" not in st.session_state:
@@ -170,9 +163,9 @@ if "current_chat_id" not in st.session_state:
             {"role": "assistant", "content": "Architect ready. System online."}
         ]
 
-# ======================================================
+# =====================
 # SIDEBAR
-# ======================================================
+# =====================
 with st.sidebar:
     st.title("The Blueprint")
     st.write(f"User: **{username}**")
@@ -192,9 +185,7 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.session_state.temp = st.slider(
-        "Creativity", 0.0, 1.0, st.session_state.temp, 0.1
-    )
+    st.session_state.temp = st.slider("Creativity", 0.0, 1.0, st.session_state.temp, 0.1)
 
     if st.button("Logout", type="primary", use_container_width=True):
         supabase.auth.sign_out()
@@ -202,41 +193,26 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# ======================================================
-# CHAT UI (COLOR FIXED)
-# ======================================================
+# =====================
+# CHAT UI
+# =====================
 for msg in st.session_state.messages:
-    if msg["role"] == "assistant":
-        st.markdown(
-            f"""
-            <div style="color:#22c55e;font-weight:600;">Architect:</div>
-            <div style="margin-left:8px;">{msg['content']}</div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            f"""
-            <div style="color:#3b82f6;font-weight:600;">{username}:</div>
-            <div style="margin-left:8px;">{msg['content']}</div>
-            """,
-            unsafe_allow_html=True
-        )
+    name = "Architect" if msg["role"] == "assistant" else username
+    st.markdown(f"**{name}:** {msg['content']}")
 
-# ======================================================
+# =====================
 # INPUT
-# ======================================================
+# =====================
 if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
     content = prompt.text + "".join(
-        f"\n\n[Document]\n{read_document(f)}"
-        for f in prompt.files
+        f"\n\n[Document]\n{read_document(f)}" for f in prompt.files
     )
     st.session_state.messages.append({"role": "user", "content": content})
     st.rerun()
 
-# ======================================================
-# AI RESPONSE (STREAMING)
-# ======================================================
+# =====================
+# AI RESPONSE
+# =====================
 if st.session_state.messages[-1]["role"] == "user":
 
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
@@ -246,10 +222,9 @@ if st.session_state.messages[-1]["role"] == "user":
         "https://router.huggingface.co/v1/chat/completions",
         headers={"Authorization": f"Bearer {TOKEN}"},
         json={
-            "model": MODEL,
-            "messages": [
-                {"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}
-            ] + st.session_state.messages,
+            "model": DEDICATED_MODEL,
+            "messages": [{"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}]
+                        + st.session_state.messages,
             "temperature": st.session_state.temp,
             "stream": True
         },
@@ -257,19 +232,12 @@ if st.session_state.messages[-1]["role"] == "user":
     )
 
     for line in r.iter_lines():
-        if not line:
-            continue
-        data = line.decode()
-        if data.startswith("data: ") and "[DONE]" not in data:
-            token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
-            full += token
-            box.markdown(
-                f"""
-                <div style="color:#22c55e;font-weight:600;">Architect:</div>
-                <div style="margin-left:8px;">{full}▌</div>
-                """,
-                unsafe_allow_html=True
-            )
+        if line:
+            data = line.decode()
+            if data.startswith("data: ") and "[DONE]" not in data:
+                token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
+                full += token
+                box.markdown(f"**:green[Architect]:** {full}▌")
 
     st.session_state.messages.append({"role": "assistant", "content": full})
     save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
