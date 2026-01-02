@@ -26,19 +26,21 @@ def init_supabase():
 supabase = init_supabase()
 
 # --- 3. SESSION PERSISTENCE ---
-# Memastikan sesi diambil secara benar dari Supabase Auth
+if "temp" not in st.session_state:
+    st.session_state.temp = 0.4
+
 if "user_data" not in st.session_state:
     try:
-        # Cek apakah ada sesi aktif yang tersimpan di browser
+        # Mengambil sesi aktif dari browser jika ada
         res = supabase.auth.get_session()
         if res and res.session:
             st.session_state.user_data = res.session.user
-            # Ambil username dari metadata atau email
             st.session_state.username = res.session.user.user_metadata.get(
                 "username", res.session.user.email.split('@')[0]
             )
     except:
         pass
+
 # --- 4. HELPERS ---
 def read_document(file):
     try:
@@ -105,7 +107,6 @@ user_id = st.session_state.user_data.id
 username = st.session_state.username
 db_history = load_user_chats(user_id)
 
-# FIX: Inisialisasi variabel state sebelum digunakan di sidebar
 if "current_chat_id" not in st.session_state:
     if db_history:
         latest_id = list(db_history.keys())[0]
@@ -140,7 +141,6 @@ with st.sidebar:
         if not db_history:
             st.caption("No archived blueprints.")
         for cid in db_history.keys():
-            # Gunakan .get() agar lebih aman dari AttributeError
             is_active = cid == st.session_state.get("current_chat_id")
             btn_label = f"» {cid}" if is_active else cid
             if st.button(btn_label, key=f"btn_{cid}", use_container_width=True):
@@ -151,13 +151,12 @@ with st.sidebar:
     st.divider()
     with st.expander("⚙️ System Control"):
         st.write("Model Settings")
-        st.session_state.temp = st.slider("Creativity", 0.0, 1.0, st.session_state.temp, 0.1)
+        st.session_state.temp = st.slider("Creativity", 0.0, 1.0, float(st.session_state.get("temp", 0.4)), 0.1)
         
         st.divider()
         if st.button("Clear All Blueprints", use_container_width=True):
             try:
                 supabase.table("chat_history").delete().eq("user_id", user_id).execute()
-                # Reset state sepenuhnya setelah hapus data
                 st.session_state.pop("messages", None)
                 st.session_state.pop("current_chat_id", None)
                 st.rerun()
@@ -190,15 +189,11 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
         st.session_state.current_chat_id = (user_text[:30] + '...') if len(user_text) > 30 else user_text
     st.rerun()
 
-#if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    # Gunakan empty container untuk simulasi streaming tanpa avatar
+# --- 8. AI RESPONSE (Aktif dan Diperbaiki) ---
+if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     res_box = st.empty() 
     full_res = ""
-    
-    # Ambil token dari secrets atau env
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    
-    # Header identitas asisten
     assistant_header = f"**:green[Architect]**: "
     
     sys_prompt = [{
@@ -219,34 +214,22 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
             stream=True
         )
         
-        # Proses chunk data streaming
         for line in resp.iter_lines():
             if line:
                 decoded = line.decode('utf-8')
                 if decoded.startswith("data: ") and "[DONE]" not in decoded:
                     try:
-                        # Parsing JSON dari stream HuggingFace
                         chunk = json.loads(decoded[6:])
-                        token = chunk["choices"][0]["delta"].get("content", "")
-                        full_res += token
-                        # Update tampilan secara real-time dengan cursor
-                        res_box.markdown(f"{assistant_header}{full_res}▌")
+                        if chunk["choices"][0]["delta"].get("content"):
+                            token = chunk["choices"][0]["delta"]["content"]
+                            full_res += token
+                            res_box.markdown(f"{assistant_header}{full_res}▌")
                     except:
                         continue
         
-        # Tampilan final tanpa cursor
         res_box.markdown(f"{assistant_header}{full_res}")
-        
-        # Simpan ke session state dan database
         st.session_state.messages.append({"role": "assistant", "content": full_res})
-        save_chat_to_db(
-            st.session_state.user_data.id, 
-            st.session_state.current_chat_id, 
-            st.session_state.messages, 
-            username
-        )
-        
-        # Rerun untuk memastikan UI sinkron dengan state terbaru
+        save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
         st.rerun()
         
     except Exception as e:
