@@ -54,7 +54,6 @@ if "user" not in st.session_state:
                 st.session_state.temp = 0.4
                 st.rerun()
         except:
-            # Perbaikan Indentasi & Metode Hapus Aman
             for key in ["access_token", "refresh_token"]:
                 if key in cookies:
                     del cookies[key]
@@ -166,7 +165,6 @@ with st.sidebar:
     
     if st.button("Logout", type="secondary", use_container_width=True):
         supabase.auth.sign_out()
-        # Perbaikan Metode Hapus Aman untuk Logout
         for key in ["access_token", "refresh_token"]:
             if key in cookies:
                 del cookies[key]
@@ -200,7 +198,7 @@ if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
     if st.session_state.current_chat_id.startswith("Blueprint"):
         st.session_state.current_chat_id = prompt.text[:25] + "..." if len(prompt.text) > 25 else prompt.text
 
-    # Tampilkan prompt user segera agar tidak terlihat "langsung respon"
+    # Tampilkan prompt user segera
     st.markdown(f"**<span style='color:#3498db'>{username}</span>**: {prompt.text}", unsafe_allow_html=True)
     st.write("") 
 
@@ -227,14 +225,24 @@ if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
             if line:
                 decoded = line.decode()
                 if decoded.startswith("data: ") and "[DONE]" not in decoded:
-                    token = json.loads(decoded[6:])["choices"][0]["delta"].get("content", "")
-                    full_response += token
-                    response_placeholder.markdown(full_response + "▌")
+                    try:
+                        json_data = json.loads(decoded[6:])
+                        if "choices" in json_data and len(json_data["choices"]) > 0:
+                            delta = json_data["choices"][0].get("delta", {})
+                            token = delta.get("content", "")
+                            if token:
+                                full_response += token
+                                response_placeholder.markdown(full_response + "▌")
+                    except Exception:
+                        continue
         
-        response_placeholder.markdown(full_response)
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
-        save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
-        st.rerun()
-        
+        if full_response:
+            response_placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
+            st.rerun()
+        else:
+            st.warning("Architect tidak memberikan respons. Silakan coba lagi.")
+            
     except Exception as e:
         st.error(f"Link lost: {e}")
