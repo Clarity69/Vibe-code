@@ -188,17 +188,26 @@ for msg in st.session_state.messages:
 # INPUT & AI
 # =====================
 if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
+    # 1. Olah file dan teks
     file_content = ""
     for f in prompt.files:
         file_content += f"\n\n[Document: {f.name}]\n{read_document(f)}"
     
     full_prompt = prompt.text + file_content
+    
+    # 2. Tambahkan ke session state
     st.session_state.messages.append({"role": "user", "content": full_prompt})
     
+    # 3. Rename chat jika perlu
     if st.session_state.current_chat_id.startswith("Blueprint"):
         st.session_state.current_chat_id = prompt.text[:25] + "..." if len(prompt.text) > 25 else prompt.text
 
-    # AI Response
+    # 4. TAMPILKAN PROMPT USER SEGERA (PENTING!)
+    # Ini memastikan pesan muncul di layar sebelum proses AI dimulai
+    st.markdown(f"**<span style='color:#3498db'>{username}</span>**: {prompt.text}", unsafe_allow_html=True)
+    st.write("") 
+
+    # 5. Mulai AI Response
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
     
     st.markdown(f"**<span style='color:#2ecc71'>Architect</span>**:", unsafe_allow_html=True)
@@ -227,8 +236,12 @@ if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
                     response_placeholder.markdown(full_response + "▌")
         
         response_placeholder.markdown(full_response)
+        
+        # Simpan jawaban AI dan simpan ke DB
         st.session_state.messages.append({"role": "assistant", "content": full_response})
         save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
+        
+        # Terakhir baru rerun untuk merapikan semua UI
         st.rerun()
         
     except Exception as e:
