@@ -28,13 +28,10 @@ supabase = init_supabase()
 # --- 3. SESSION PERSISTENCE ---
 if "user_data" not in st.session_state:
     try:
-        # Mencoba mengambil sesi yang tersimpan di browser via Supabase Auth
-        res = supabase.auth.get_session()
-        if res and res.session:
-            st.session_state.user_data = res.session.user
-            st.session_state.username = res.session.user.user_metadata.get(
-                "username", res.session.user.email.split('@')[0]
-            )
+        session = supabase.auth.get_session()
+        if session and session.user:
+            st.session_state.user_data = session.user
+            st.session_state.username = session.user.user_metadata.get("username", session.user.email.split('@')[0])
     except:
         pass
 
@@ -81,9 +78,6 @@ if "user_data" not in st.session_state:
         with st.form("login_form"):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
-            # Tetap ada checkbox, meski logikanya bergantung pada provider Supabase
-            stay_logged_in = st.checkbox("Stay Logged In", value=True)
-            
             if st.form_submit_button("Login", use_container_width=True):
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
@@ -105,11 +99,12 @@ if "user_data" not in st.session_state:
                     st.error(f"Failed: {e}")
     st.stop()
 
-# --- 6. SIDEBAR ---
+# --- 6. SIDEBAR REORGANIZATION ---
 user_id = st.session_state.user_data.id
 username = st.session_state.username
 db_history = load_user_chats(user_id)
 
+# FIX: Inisialisasi variabel state sebelum digunakan di sidebar
 if "current_chat_id" not in st.session_state:
     if db_history:
         latest_id = list(db_history.keys())[0]
@@ -129,6 +124,7 @@ st.markdown("""
 with st.sidebar:
     st.title("The Blueprint")
     st.write(f"User: **{username}**")
+    st.caption("● System Online")
     
     if st.button("+ New Blueprint", use_container_width=True, type="primary"):
         st.session_state.current_chat_id = f"Blueprint {len(db_history) + 1}"
@@ -136,12 +132,14 @@ with st.sidebar:
         st.rerun()
     
     st.divider()
+    
     st.subheader("Archive")
     history_container = st.container(height=350, border=False)
     with history_container:
         if not db_history:
             st.caption("No archived blueprints.")
         for cid in db_history.keys():
+            # Gunakan .get() agar lebih aman dari AttributeError
             is_active = cid == st.session_state.get("current_chat_id")
             btn_label = f"» {cid}" if is_active else cid
             if st.button(btn_label, key=f"btn_{cid}", use_container_width=True):
@@ -151,7 +149,20 @@ with st.sidebar:
 
     st.divider()
     with st.expander("⚙️ System Control"):
-        st.session_state.temp = st.slider("Creativity", 0.0, 1.0, float(st.session_state.get("temp", 0.4)), 0.1)
+        st.write("Model Settings")
+        st.session_state.temp = st.slider("Creativity", 0.0, 1.0, st.session_state.temp, 0.1)
+        
+        st.divider()
+        if st.button("Clear All Blueprints", use_container_width=True):
+            try:
+                supabase.table("chat_history").delete().eq("user_id", user_id).execute()
+                # Reset state sepenuhnya setelah hapus data
+                st.session_state.pop("messages", None)
+                st.session_state.pop("current_chat_id", None)
+                st.rerun()
+            except:
+                st.error("Error clearing data.")
+
         if st.button("Logout", use_container_width=True, type="primary"):
             supabase.auth.sign_out()
             st.session_state.clear()
@@ -168,6 +179,7 @@ for msg in st.session_state.messages:
         st.markdown(f"**:blue[{username}]**: {content}")
     else:
         st.markdown(f"**:green[Architect]**: {msg['content']}")
+    st.write("") 
 
 if prompt_data := st.chat_input("Input system requirements...", accept_file=True):
     user_text = prompt_data.text
@@ -179,9 +191,12 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
 
 # --- 8. AI RESPONSE ---
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    # GANTI: Jangan pakai 'with st.chat_message'
+    # Pakai st.empty() langsung di area utama agar tidak memicu container avatar
     res_box = st.empty() 
     full_res = ""
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+    sys_prompt = [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}. Use markdown."}]
     
     try:
         resp = requests.post(
@@ -189,24 +204,24 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
             headers={"Authorization": f"Bearer {TOKEN}"},
             json={
                 "model": DEDICATED_MODEL, 
-                "messages": [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}."}] + st.session_state.messages, 
+                "messages": sys_prompt + st.session_state.messages, 
                 "temperature": st.session_state.temp, 
                 "stream": True
             },
             stream=True
         )
-        
         for line in resp.iter_lines():
             if line:
                 decoded = line.decode('utf-8')
                 if decoded.startswith("data: ") and "[DONE]" not in decoded:
                     try:
-                        chunk = json.loads(decoded[6:])
-                        token = chunk["choices"][0]["delta"].get("content", "")
+                        token = json.loads(decoded[6:])["choices"][0]["delta"].get("content", "")
                         full_res += token
+                        # Tampilkan teks hijau langsung di area chat
                         res_box.markdown(f"**:green[Architect]**: {full_res}▌")
                     except: continue
         
+        # Tampilan akhir tanpa kursor streaming
         res_box.markdown(f"**:green[Architect]**: {full_res}")
         st.session_state.messages.append({"role": "assistant", "content": full_res})
         save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
