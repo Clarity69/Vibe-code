@@ -16,19 +16,24 @@ st.set_page_config(page_title="The Blueprint", layout="wide")
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # =====================
-# COOKIES
+# COOKIES (Lazy Init)
 # =====================
-cookies = EncryptedCookieManager(
-    prefix="blueprint_",
-    password=os.getenv("COOKIE_SECRET", "dev-secret")
-)
+@st.cache_resource
+def get_cookie_manager():
+    return EncryptedCookieManager(
+        prefix="blueprint_",
+        password=os.getenv("COOKIE_SECRET", "dev-secret")
+    )
+
+cookies = get_cookie_manager()
 
 if not cookies.ready():
     st.stop()
 
 # =====================
-# SUPABASE
+# SUPABASE (Cached)
 # =====================
+@st.cache_resource
 def get_supabase():
     return create_client(
         st.secrets.get("SUPABASE_URL") or os.getenv("SUPABASE_URL"),
@@ -38,23 +43,39 @@ def get_supabase():
 supabase = get_supabase()
 
 # =====================
-# SESSION REHYDRATION
+# SESSION REHYDRATION (Optimized)
 # =====================
 if "user" not in st.session_state and "access_token" in cookies:
     try:
-        supabase.auth.set_session(
-            cookies["access_token"],
-            cookies["refresh_token"]
-        )
-        user = supabase.auth.get_user().user
-        st.session_state.user = user
-        st.session_state.username = (
-            user.user_metadata.get("username")
-            or user.email.split("@")[0]
-        )
-        st.session_state.temp = 0.4
-    except:
+        # Set session tanpa re-fetch user jika sudah ada di cookies
+        if "cached_user" in cookies:
+            user_data = json.loads(cookies["cached_user"])
+            st.session_state.user = type('User', (), user_data)()
+            st.session_state.username = user_data.get("username", user_data.get("email", "").split("@")[0])
+            st.session_state.temp = 0.4
+        else:
+            supabase.auth.set_session(
+                cookies["access_token"],
+                cookies["refresh_token"]
+            )
+            user = supabase.auth.get_user().user
+            st.session_state.user = user
+            st.session_state.username = (
+                user.user_metadata.get("username")
+                or user.email.split("@")[0]
+            )
+            st.session_state.temp = 0.4
+            
+            # Cache user data
+            cookies["cached_user"] = json.dumps({
+                "id": user.id,
+                "email": user.email,
+                "username": st.session_state.username
+            })
+            cookies.save()
+    except Exception as e:
         cookies.clear()
+        st.error(f"Session expired. Please login again.")
 
 # =====================
 # HELPERS
@@ -69,28 +90,36 @@ def read_document(file):
     except:
         return ""
 
-def load_user_chats(uid):
+# Lazy load chat history - hanya load saat dibutuhkan
+@st.cache_data(ttl=60)  # Cache selama 60 detik
+def load_user_chats(_uid):
     try:
         res = supabase.table("chat_history") \
             .select("*") \
-            .eq("user_id", uid) \
+            .eq("user_id", _uid) \
             .order("last_updated", desc=True) \
-            .execute()
+            .limit(20) \
+            .execute()  # Batasi hanya 20 chat terakhir
         return {r["chat_id"]: r["messages"] for r in res.data}
     except:
         return {}
 
 def save_chat(uid, cid, msgs, uname):
-    supabase.table("chat_history").upsert(
-        {
-            "user_id": uid,
-            "chat_id": cid,
-            "messages": msgs,
-            "username": uname,
-            "last_updated": datetime.datetime.utcnow().isoformat()
-        },
-        on_conflict="user_id,chat_id"
-    ).execute()
+    try:
+        supabase.table("chat_history").upsert(
+            {
+                "user_id": uid,
+                "chat_id": cid,
+                "messages": msgs,
+                "username": uname,
+                "last_updated": datetime.datetime.utcnow().isoformat()
+            },
+            on_conflict="user_id,chat_id"
+        ).execute()
+        # Clear cache setelah save
+        load_user_chats.clear()
+    except Exception as e:
+        st.error(f"Failed to save chat: {str(e)}")
 
 # =====================
 # AUTH GATE
@@ -107,22 +136,33 @@ if "user" not in st.session_state:
             password = st.text_input("Password", type="password")
 
             if st.form_submit_button("Login", use_container_width=True):
-                res = supabase.auth.sign_in_with_password({
-                    "email": email,
-                    "password": password
-                })
+                with st.spinner("Logging in..."):
+                    try:
+                        res = supabase.auth.sign_in_with_password({
+                            "email": email,
+                            "password": password
+                        })
 
-                cookies["access_token"] = res.session.access_token
-                cookies["refresh_token"] = res.session.refresh_token
-                cookies.save()
+                        # Save tokens
+                        cookies["access_token"] = res.session.access_token
+                        cookies["refresh_token"] = res.session.refresh_token
+                        
+                        # Cache user data untuk login cepat
+                        username = res.user.user_metadata.get("username") or email.split("@")[0]
+                        cookies["cached_user"] = json.dumps({
+                            "id": res.user.id,
+                            "email": res.user.email,
+                            "username": username
+                        })
+                        cookies.save()
 
-                st.session_state.user = res.user
-                st.session_state.username = (
-                    res.user.user_metadata.get("username")
-                    or email.split("@")[0]
-                )
-                st.session_state.temp = 0.4
-                st.rerun()
+                        st.session_state.user = res.user
+                        st.session_state.username = username
+                        st.session_state.temp = 0.4
+                        st.success("Login successful!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Login failed: {str(e)}")
 
     with tab_reg:
         with st.form("register"):
@@ -131,12 +171,16 @@ if "user" not in st.session_state:
             password = st.text_input("Password", type="password")
 
             if st.form_submit_button("Register", use_container_width=True):
-                supabase.auth.sign_up({
-                    "email": email,
-                    "password": password,
-                    "options": {"data": {"username": username}}
-                })
-                st.success("Registered. Please login.")
+                with st.spinner("Registering..."):
+                    try:
+                        supabase.auth.sign_up({
+                            "email": email,
+                            "password": password,
+                            "options": {"data": {"username": username}}
+                        })
+                        st.success("Registered! Please check your email and then login.")
+                    except Exception as e:
+                        st.error(f"Registration failed: {str(e)}")
 
     st.stop()
 
@@ -144,13 +188,18 @@ if "user" not in st.session_state:
 # USER CONTEXT
 # =====================
 user = st.session_state.user
-uid = user.id
+uid = user.id if hasattr(user, 'id') else user.__dict__.get('id')
 username = st.session_state.username
 
 # =====================
-# CHAT STATE
+# CHAT STATE (Lazy Load)
 # =====================
-db_history = load_user_chats(uid)
+# Hanya load chat history saat pertama kali atau saat dibutuhkan
+if "db_history_loaded" not in st.session_state:
+    db_history = load_user_chats(uid)
+    st.session_state.db_history_loaded = True
+else:
+    db_history = load_user_chats(uid)
 
 if "current_chat_id" not in st.session_state:
     if db_history:
@@ -178,11 +227,14 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    for cid in db_history:
-        if st.button(cid, key=cid, use_container_width=True):
-            st.session_state.current_chat_id = cid
-            st.session_state.messages = db_history[cid]
-            st.rerun()
+    
+    # Tampilkan hanya 10 chat terakhir di sidebar untuk performa
+    with st.container():
+        for i, cid in enumerate(list(db_history.keys())[:10]):
+            if st.button(cid, key=cid, use_container_width=True):
+                st.session_state.current_chat_id = cid
+                st.session_state.messages = db_history[cid]
+                st.rerun()
 
     st.divider()
     st.session_state.temp = st.slider("Creativity", 0.0, 1.0, st.session_state.temp, 0.1)
@@ -191,6 +243,7 @@ with st.sidebar:
         supabase.auth.sign_out()
         cookies.clear()
         st.session_state.clear()
+        load_user_chats.clear()
         st.rerun()
 
 # =====================
@@ -218,27 +271,32 @@ if st.session_state.messages[-1]["role"] == "user":
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
     box, full = st.empty(), ""
 
-    r = requests.post(
-        "https://router.huggingface.co/v1/chat/completions",
-        headers={"Authorization": f"Bearer {TOKEN}"},
-        json={
-            "model": DEDICATED_MODEL,
-            "messages": [{"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}]
-                        + st.session_state.messages,
-            "temperature": st.session_state.temp,
-            "stream": True
-        },
-        stream=True
-    )
+    try:
+        r = requests.post(
+            "https://router.huggingface.co/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json={
+                "model": DEDICATED_MODEL,
+                "messages": [{"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}]
+                            + st.session_state.messages,
+                "temperature": st.session_state.temp,
+                "stream": True
+            },
+            stream=True,
+            timeout=30
+        )
 
-    for line in r.iter_lines():
-        if line:
-            data = line.decode()
-            if data.startswith("data: ") and "[DONE]" not in data:
-                token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
-                full += token
-                box.markdown(f"**:green[Architect]:** {full}▌")
+        for line in r.iter_lines():
+            if line:
+                data = line.decode()
+                if data.startswith("data: ") and "[DONE]" not in data:
+                    token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
+                    full += token
+                    box.markdown(f"**:green[Architect]:** {full}▌")
 
-    st.session_state.messages.append({"role": "assistant", "content": full})
-    save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
-    st.rerun()
+        st.session_state.messages.append({"role": "assistant", "content": full})
+        save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
+        st.rerun()
+    except Exception as e:
+        st.error(f"Error generating response: {str(e)}")
+        st.session_state.messages.pop()  # Remove user message jika gagal
