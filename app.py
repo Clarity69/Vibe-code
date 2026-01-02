@@ -15,7 +15,7 @@ st.set_page_config(page_title="The Blueprint", layout="wide")
 DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # =====================
-# COOKIES (Perbaikan: Inisialisasi)
+# COOKIES
 # =====================
 cookies = EncryptedCookieManager(
     prefix="blueprint/",
@@ -23,7 +23,6 @@ cookies = EncryptedCookieManager(
 )
 
 if not cookies.ready():
-    # Menunggu cookie siap tanpa menghentikan total aplikasi
     st.info("Synchronizing session... Please wait.")
     st.stop()
 
@@ -39,7 +38,7 @@ def get_supabase():
 supabase = get_supabase()
 
 # =====================
-# SESSION REHYDRATION (Perbaikan: Logika Load)
+# SESSION REHYDRATION
 # =====================
 if "user" not in st.session_state:
     token = cookies.get("access_token")
@@ -47,17 +46,14 @@ if "user" not in st.session_state:
     
     if token and refresh:
         try:
-            # Set session ke client supabase
             auth_res = supabase.auth.set_session(token, refresh)
             user_res = supabase.auth.get_user()
-            
             if user_res.user:
                 st.session_state.user = user_res.user
                 st.session_state.username = user_res.user.user_metadata.get("username") or user_res.user.email.split("@")[0]
                 st.session_state.temp = 0.4
-                st.rerun() # Refresh untuk masuk ke dashboard
+                st.rerun()
         except:
-            # Jika token expired, hapus cookie
             cookies.delete("access_token")
             cookies.delete("refresh_token")
             cookies.save()
@@ -99,17 +95,13 @@ if "user" not in st.session_state:
         with st.form("login"):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
-            stay_logged = st.checkbox("Stay Logged In", value=True)
-
             if st.form_submit_button("Login", use_container_width=True):
                 try:
                     res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                     if res.session:
-                        # SIMPAN KE COOKIE
                         cookies["access_token"] = res.session.access_token
                         cookies["refresh_token"] = res.session.refresh_token
-                        cookies.save() # Trigger browser save
-
+                        cookies.save()
                         st.session_state.user = res.user
                         st.session_state.username = res.user.user_metadata.get("username") or email.split("@")[0]
                         st.session_state.temp = 0.4
@@ -137,7 +129,6 @@ uid = st.session_state.user.id
 username = st.session_state.username
 db_history = load_user_chats(uid)
 
-# Chat State Initialization
 if "messages" not in st.session_state:
     if db_history:
         first_cid = next(iter(db_history))
@@ -180,20 +171,23 @@ with st.sidebar:
         st.rerun()
 
 # =====================
-# CHAT UI
+# CHAT UI (Custom Style: No Avatars, Colored Names)
 # =====================
 st.caption(f"Active Session: {st.session_state.current_chat_id}")
+
 for msg in st.session_state.messages:
-    role = "Architect" if msg["role"] == "assistant" else username
-    with st.chat_message(msg["role"]):
-        st.write(f"**{role}**")
-        st.write(msg["content"])
+    if msg["role"] == "assistant":
+        # Architect: Green (#2ecc71)
+        st.markdown(f"**<span style='color:#2ecc71'>Architect</span>**: {msg['content']}", unsafe_allow_html=True)
+    else:
+        # User: Blue (#3498db)
+        st.markdown(f"**<span style='color:#3498db'>{username}</span>**: {msg['content']}", unsafe_allow_html=True)
+    st.write("") 
 
 # =====================
 # INPUT & AI
 # =====================
 if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
-    # Gabungkan teks dan file content
     file_content = ""
     for f in prompt.files:
         file_content += f"\n\n[Document: {f.name}]\n{read_document(f)}"
@@ -201,42 +195,41 @@ if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
     full_prompt = prompt.text + file_content
     st.session_state.messages.append({"role": "user", "content": full_prompt})
     
-    # Auto-rename chat if it's new
     if st.session_state.current_chat_id.startswith("Blueprint"):
         st.session_state.current_chat_id = prompt.text[:25] + "..." if len(prompt.text) > 25 else prompt.text
 
-    # AI Response Logic
+    # AI Response
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    with st.chat_message("assistant"):
-        st.write("**Architect**")
-        response_placeholder = st.empty()
-        full_response = ""
+    
+    st.markdown(f"**<span style='color:#2ecc71'>Architect</span>**:", unsafe_allow_html=True)
+    response_placeholder = st.empty()
+    full_response = ""
+    
+    try:
+        r = requests.post(
+            "https://router.huggingface.co/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json={
+                "model": DEDICATED_MODEL,
+                "messages": [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}."}] + st.session_state.messages,
+                "temperature": st.session_state.temp,
+                "stream": True
+            },
+            stream=True
+        )
         
-        try:
-            r = requests.post(
-                "https://router.huggingface.co/v1/chat/completions",
-                headers={"Authorization": f"Bearer {TOKEN}"},
-                json={
-                    "model": DEDICATED_MODEL,
-                    "messages": [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}."}] + st.session_state.messages,
-                    "temperature": st.session_state.temp,
-                    "stream": True
-                },
-                stream=True
-            )
-            
-            for line in r.iter_lines():
-                if line:
-                    decoded = line.decode()
-                    if decoded.startswith("data: ") and "[DONE]" not in decoded:
-                        token = json.loads(decoded[6:])["choices"][0]["delta"].get("content", "")
-                        full_response += token
-                        response_placeholder.markdown(full_response + "▌")
-            
-            response_placeholder.markdown(full_response)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
-            save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"Link lost: {e}")
+        for line in r.iter_lines():
+            if line:
+                decoded = line.decode()
+                if decoded.startswith("data: ") and "[DONE]" not in decoded:
+                    token = json.loads(decoded[6:])["choices"][0]["delta"].get("content", "")
+                    full_response += token
+                    response_placeholder.markdown(full_response + "▌")
+        
+        response_placeholder.markdown(full_response)
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
+        save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Link lost: {e}")
