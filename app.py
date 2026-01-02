@@ -19,7 +19,7 @@ st.set_page_config(
 MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # ======================================================
-# COOKIES
+# COOKIES (LOGIN PERSISTENCE)
 # ======================================================
 cookies = EncryptedCookieManager(
     prefix="blueprint_",
@@ -30,7 +30,7 @@ if not cookies.ready():
     st.stop()
 
 # ======================================================
-# SUPABASE
+# SUPABASE CLIENT
 # ======================================================
 def get_supabase():
     return create_client(
@@ -41,7 +41,7 @@ def get_supabase():
 supabase = get_supabase()
 
 # ======================================================
-# SESSION REHYDRATION
+# SESSION REHYDRATION (AUTO LOGIN)
 # ======================================================
 if "user" not in st.session_state and "access_token" in cookies:
     try:
@@ -57,6 +57,7 @@ if "user" not in st.session_state and "access_token" in cookies:
             or user.email.split("@")[0]
         )
         st.session_state.temp = 0.4
+
     except:
         cookies.clear()
 
@@ -97,31 +98,6 @@ def save_chat(uid, cid, msgs, uname):
         },
         on_conflict="user_id,chat_id"
     ).execute()
-
-def parse_stream_chunk(raw: str):
-    raw = raw.strip()
-    if not raw.startswith("data:"):
-        return ""
-
-    payload = raw[5:].strip()
-
-    if payload == "[DONE]":
-        return None
-
-    try:
-        obj = json.loads(payload)
-    except json.JSONDecodeError:
-        return ""
-
-    choices = obj.get("choices")
-    if not choices or not isinstance(choices, list):
-        return ""
-
-    delta = choices[0].get("delta")
-    if not delta:
-        return ""
-
-    return delta.get("content", "")
 
 # ======================================================
 # AUTH GATE
@@ -209,7 +185,6 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-
     for cid in db_history:
         if st.button(cid, key=cid, use_container_width=True):
             st.session_state.current_chat_id = cid
@@ -217,7 +192,6 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-
     st.session_state.temp = st.slider(
         "Creativity", 0.0, 1.0, st.session_state.temp, 0.1
     )
@@ -229,7 +203,7 @@ with st.sidebar:
         st.rerun()
 
 # ======================================================
-# CHAT UI
+# CHAT UI (COLOR FIXED)
 # ======================================================
 for msg in st.session_state.messages:
     if msg["role"] == "assistant":
@@ -261,13 +235,12 @@ if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
     st.rerun()
 
 # ======================================================
-# AI RESPONSE (STREAM SAFE)
+# AI RESPONSE (STREAMING)
 # ======================================================
 if st.session_state.messages[-1]["role"] == "user":
 
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    box = st.empty()
-    full = ""
+    box, full = st.empty(), ""
 
     r = requests.post(
         "https://router.huggingface.co/v1/chat/completions",
@@ -275,28 +248,20 @@ if st.session_state.messages[-1]["role"] == "user":
         json={
             "model": MODEL,
             "messages": [
-                {
-                    "role": "system",
-                    "content": f"You are VibeCode Architect. Address user as {username}."
-                }
+                {"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}
             ] + st.session_state.messages,
             "temperature": st.session_state.temp,
             "stream": True
         },
-        stream=True,
-        timeout=120
+        stream=True
     )
 
-    for line in r.iter_lines(decode_unicode=True):
+    for line in r.iter_lines():
         if not line:
             continue
-
-        token = parse_stream_chunk(line)
-
-        if token is None:
-            break
-
-        if token:
+        data = line.decode()
+        if data.startswith("data: ") and "[DONE]" not in data:
+            token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
             full += token
             box.markdown(
                 f"""
@@ -306,13 +271,6 @@ if st.session_state.messages[-1]["role"] == "user":
                 unsafe_allow_html=True
             )
 
-    st.session_state.messages.append(
-        {"role": "assistant", "content": full}
-    )
-    save_chat(
-        uid,
-        st.session_state.current_chat_id,
-        st.session_state.messages,
-        username
-    )
+    st.session_state.messages.append({"role": "assistant", "content": full})
+    save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
     st.rerun()
