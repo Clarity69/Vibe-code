@@ -12,7 +12,8 @@ from streamlit_cookies_manager import EncryptedCookieManager
 load_dotenv()
 st.set_page_config(page_title="The Blueprint", layout="wide")
 
-DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
+DEDICATED_MODEL = "meta-llama/Llama-3.2-11B-Vision-Instruct"
+# DEDICATED_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # =====================
 # COOKIES
