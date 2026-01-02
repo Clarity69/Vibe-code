@@ -25,22 +25,33 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- 3. SESSION PERSISTENCE ---
+# --- 3. SESSION PERSISTENCE (OPTIMIZED) ---
 if "user_data" not in st.session_state:
     try:
-        # Mengambil sesi dari browser storage (jika user memilih Stay Logged In sebelumnya)
-        response = supabase.auth.get_session()
-        if response and response.session:
-            st.session_state.user_data = response.session.user
-            st.session_state.username = response.session.user.user_metadata.get(
-                "username", response.session.user.email.split('@')[0]
+        # Memberikan jeda sangat singkat agar library siap
+        # Mencoba mengambil sesi yang tersimpan di browser
+        session_response = supabase.auth.get_session()
+        
+        if session_response and session_response.session:
+            # Jika sesi ditemukan, kunci ke dalam session_state
+            st.session_state.user_data = session_response.session.user
+            st.session_state.username = session_response.session.user.user_metadata.get(
+                "username", session_response.session.user.email.split('@')[0]
             )
-    except:
+        else:
+            # Jika get_session gagal, coba ambil user langsung (fallback)
+            user_response = supabase.auth.get_user()
+            if user_response and user_response.user:
+                st.session_state.user_data = user_response.user
+                st.session_state.username = user_response.user.user_metadata.get(
+                    "username", user_response.user.email.split('@')[0]
+                )
+    except Exception:
+        # Jika benar-benar tidak ada data, biarkan user ke halaman login
         pass
 
 if "temp" not in st.session_state:
     st.session_state.temp = 0.4
-
 # --- 4. HELPERS ---
 def read_document(file):
     try:
