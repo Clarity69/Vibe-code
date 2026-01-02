@@ -240,29 +240,37 @@ if prompt := st.chat_input("Describe your blueprint...", accept_file=True):
 if st.session_state.messages[-1]["role"] == "user":
 
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+    box, full = st.empty(), ""
 
-    with st.spinner("Architect is thinking..."):
-        r = requests.post(
-            "https://router.huggingface.co/v1/chat/completions",
-            headers={"Authorization": f"Bearer {TOKEN}"},
-            json={
-                "model": MODEL,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": f"You are VibeCode Architect. Address user as {username}."
-                    }
-                ] + st.session_state.messages,
-                "temperature": st.session_state.temp,
-            },
-            timeout=120
-        )
-
-    data = r.json()
-    full = data["choices"][0]["message"]["content"]
-
-    st.session_state.messages.append(
-        {"role": "assistant", "content": full}
+    r = requests.post(
+        "https://router.huggingface.co/v1/chat/completions",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        json={
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": f"You are VibeCode Architect. Address user as {username}."}
+            ] + st.session_state.messages,
+            "temperature": st.session_state.temp,
+            "stream": True
+        },
+        stream=True
     )
+
+    for line in r.iter_lines():
+        if not line:
+            continue
+        data = line.decode()
+        if data.startswith("data: ") and "[DONE]" not in data:
+            token = json.loads(data[6:])["choices"][0]["delta"].get("content", "")
+            full += token
+            box.markdown(
+                f"""
+                <div style="color:#22c55e;font-weight:600;">Architect:</div>
+                <div style="margin-left:8px;">{full}▌</div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    st.session_state.messages.append({"role": "assistant", "content": full})
     save_chat(uid, st.session_state.current_chat_id, st.session_state.messages, username)
     st.rerun()
