@@ -31,6 +31,24 @@ def get_supabase():
 supabase = get_supabase()
 
 # =====================
+# SESSION REHYDRATION
+# =====================
+if "user" not in st.session_state:
+    try:
+        session = supabase.auth.get_session()
+        if session and session.user:
+            st.session_state.user = session.user
+            st.session_state.username = (
+                session.user.user_metadata.get("username")
+                or session.user.email.split("@")[0]
+            )
+            if "temp" not in st.session_state:
+                st.session_state.temp = 0.4
+    except:
+        pass
+
+
+# =====================
 # HELPERS
 # =====================
 def read_document(file):
@@ -181,8 +199,10 @@ with st.sidebar:
     )
 
     if st.button("Logout", type="primary", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
+    supabase.auth.sign_out()   # <- WAJIB
+    st.session_state.clear()
+    st.rerun()
+
 
 # =====================
 # CHAT UI
