@@ -199,9 +199,9 @@ with st.sidebar:
     )
 
     if st.button("Logout", type="primary", use_container_width=True):
-    supabase.auth.sign_out()   # <- WAJIB
-    st.session_state.clear()
-    st.rerun()
+        supabase.auth.sign_out()   # <- WAJIB
+        st.session_state.clear()
+        st.rerun()
 
 
 # =====================
