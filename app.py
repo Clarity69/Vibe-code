@@ -26,18 +26,19 @@ def init_supabase():
 supabase = init_supabase()
 
 # --- 3. SESSION PERSISTENCE ---
+# Memastikan sesi diambil secara benar dari Supabase Auth
 if "user_data" not in st.session_state:
     try:
-        session = supabase.auth.get_session()
-        if session and session.user:
-            st.session_state.user_data = session.user
-            st.session_state.username = session.user.user_metadata.get("username", session.user.email.split('@')[0])
+        # Cek apakah ada sesi aktif yang tersimpan di browser
+        res = supabase.auth.get_session()
+        if res and res.session:
+            st.session_state.user_data = res.session.user
+            # Ambil username dari metadata atau email
+            st.session_state.username = res.session.user.user_metadata.get(
+                "username", res.session.user.email.split('@')[0]
+            )
     except:
         pass
-
-if "temp" not in st.session_state:
-    st.session_state.temp = 0.4
-
 # --- 4. HELPERS ---
 def read_document(file):
     try:
@@ -189,14 +190,21 @@ if prompt_data := st.chat_input("Input system requirements...", accept_file=True
         st.session_state.current_chat_id = (user_text[:30] + '...') if len(user_text) > 30 else user_text
     st.rerun()
 
-# --- 8. AI RESPONSE ---
-if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    # GANTI: Jangan pakai 'with st.chat_message'
-    # Pakai st.empty() langsung di area utama agar tidak memicu container avatar
+#if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    # Gunakan empty container untuk simulasi streaming tanpa avatar
     res_box = st.empty() 
     full_res = ""
+    
+    # Ambil token dari secrets atau env
     TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
-    sys_prompt = [{"role": "system", "content": f"You are VibeCode Architect. Senior developer. Address user as {username}. Use markdown."}]
+    
+    # Header identitas asisten
+    assistant_header = f"**:green[Architect]**: "
+    
+    sys_prompt = [{
+        "role": "system", 
+        "content": f"You are VibeCode Architect. Senior developer. Address user as {username}. Use markdown."
+    }]
     
     try:
         resp = requests.post(
@@ -210,21 +218,36 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
             },
             stream=True
         )
+        
+        # Proses chunk data streaming
         for line in resp.iter_lines():
             if line:
                 decoded = line.decode('utf-8')
                 if decoded.startswith("data: ") and "[DONE]" not in decoded:
                     try:
-                        token = json.loads(decoded[6:])["choices"][0]["delta"].get("content", "")
+                        # Parsing JSON dari stream HuggingFace
+                        chunk = json.loads(decoded[6:])
+                        token = chunk["choices"][0]["delta"].get("content", "")
                         full_res += token
-                        # Tampilkan teks hijau langsung di area chat
-                        res_box.markdown(f"**:green[Architect]**: {full_res}▌")
-                    except: continue
+                        # Update tampilan secara real-time dengan cursor
+                        res_box.markdown(f"{assistant_header}{full_res}▌")
+                    except:
+                        continue
         
-        # Tampilan akhir tanpa kursor streaming
-        res_box.markdown(f"**:green[Architect]**: {full_res}")
+        # Tampilan final tanpa cursor
+        res_box.markdown(f"{assistant_header}{full_res}")
+        
+        # Simpan ke session state dan database
         st.session_state.messages.append({"role": "assistant", "content": full_res})
-        save_chat_to_db(user_id, st.session_state.current_chat_id, st.session_state.messages, username)
+        save_chat_to_db(
+            st.session_state.user_data.id, 
+            st.session_state.current_chat_id, 
+            st.session_state.messages, 
+            username
+        )
+        
+        # Rerun untuk memastikan UI sinkron dengan state terbaru
         st.rerun()
+        
     except Exception as e:
         st.error(f"Architect link lost: {e}")
